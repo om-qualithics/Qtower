@@ -10,6 +10,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
       APP_DB_USER: ${APP_DB_USER:?APP_DB_USER is required}
       APP_DB_PASSWORD: ${APP_DB_PASSWORD:?APP_DB_PASSWORD is required}
+      JACKSON_DB_NAME: ${JACKSON_DB_NAME:-jackson}
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
@@ -51,3 +52,48 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+
+  # SAML/OIDC-as-OAuth2 broker + SCIM Directory Sync (formerly BoxyHQ
+  # Jackson, now Ory Polis - handoff.md's "BoxyHQ" requirement, same
+  # open-source project). Pinned to the last pre-rebrand release (1.52.2,
+  # Jul 2025) rather than the current 26.2.0 - see aboutproject.md
+  # Milestone 2 for why (a core SSO endpoint is Enterprise-License-gated
+  # in 26.2.0, confirmed via server logs during setup).
+  jackson:
+    image: boxyhq/jackson:1.52.2
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DB_ENGINE: sql
+      DB_TYPE: postgres
+      DB_URL: postgres://${POSTGRES_USER:-misty}:${POSTGRES_PASSWORD}@postgres:5432/${JACKSON_DB_NAME:-jackson}
+      DB_ENCRYPTION_KEY: ${JACKSON_DB_ENCRYPTION_KEY:?JACKSON_DB_ENCRYPTION_KEY is required}
+      # NOTE: this image's compiled middleware reads JACKSON_API_KEYS, not
+      # API_KEYS as current upstream docs claim (verified by reading the
+      # actual bundled server code - see aboutproject.md).
+      JACKSON_API_KEYS: ${JACKSON_API_KEYS:?JACKSON_API_KEYS is required}
+      NEXTAUTH_SECRET: ${JACKSON_NEXTAUTH_SECRET:?JACKSON_NEXTAUTH_SECRET is required}
+      NEXTAUTH_ADMIN_CREDENTIALS: ${JACKSON_ADMIN_CREDENTIALS:-}
+      EXTERNAL_URL: http://localhost:${JACKSON_PORT:-5225}
+      NEXTAUTH_URL: http://localhost:${JACKSON_PORT:-5225}
+      WEBHOOK_URL: ${JACKSON_WEBHOOK_URL:-http://host.docker.internal:8000/identity/scim/webhook}
+      WEBHOOK_SECRET: ${JACKSON_WEBHOOK_SECRET:?JACKSON_WEBHOOK_SECRET is required}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "${JACKSON_PORT:-5225}:5225"
+
+  # Fake SAML IdP for local testing (no real Entra ID / Google Workspace
+  # test tenant available yet - see aboutproject.md Milestone 1 decision).
+  mock-saml:
+    image: boxyhq/mock-saml:latest
+    restart: unless-stopped
+    environment:
+      APP_URL: http://localhost:${MOCK_SAML_PORT:-4000}
+      ENTITY_ID: https://mock-saml.misty.local/entityid
+      PUBLIC_KEY: ${MOCK_SAML_PUBLIC_KEY:?run infra/scripts/gen-mock-saml-cert.sh first}
+      PRIVATE_KEY: ${MOCK_SAML_PRIVATE_KEY:?run infra/scripts/gen-mock-saml-cert.sh first}
+    ports:
+      - "${MOCK_SAML_PORT:-4000}:4000"

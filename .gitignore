@@ -30,9 +30,11 @@ build/
 
 # Local infra data (bind-mounted volumes)
 infra/data/
+infra/dev-certs/
 
 # OS / editor
 .DS_Store
 Thumbs.db
 .vscode/
 .idea/
+.claude/

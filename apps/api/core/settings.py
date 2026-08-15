@@ -23,9 +23,15 @@ class Settings(BaseSettings):
 
     jwt_signing_key: str = "dev-only-change-me"
     public_hostname: str = "localhost"
+    api_public_url: str = "http://localhost:8000"
+    web_public_url: str = "http://localhost:3000"
 
     ai_provider: str = "mock"
     anthropic_api_key: str = ""
+
+    jackson_base_url: str = "http://localhost:5225"
+    jackson_api_keys: str = ""
+    jackson_webhook_secret: str = ""
 
 
 settings = Settings()
