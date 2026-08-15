@@ -1,0 +1,14 @@
+**/.venv
+**/__pycache__
+**/*.pyc
+apps/web/node_modules
+apps/web/.next
+**/.env
+**/.env.*
+!**/.env.example
+infra/data
+Design
+handoff.md
+Project misty.docx
+aboutproject.md
+.git
