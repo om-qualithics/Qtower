@@ -1,3 +1,4 @@
+import base64
 from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -32,6 +33,15 @@ class Settings(BaseSettings):
     jackson_base_url: str = "http://localhost:5225"
     jackson_api_keys: str = ""
     jackson_webhook_secret: str = ""
+
+    license_public_key: str = ""
+    license_token: str = ""
+
+    @property
+    def license_public_key_pem(self) -> str:
+        if not self.license_public_key:
+            return ""
+        return base64.b64decode(self.license_public_key).decode()
 
 
 settings = Settings()

@@ -1,29 +1,50 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { API_BASE_URL, fetchCurrentUser, loginUrl, type CurrentUser } from "@/lib/api";
+import {
+  API_BASE_URL,
+  fetchBrandingConfig,
+  fetchCurrentUser,
+  loginUrl,
+  type BrandingConfig,
+  type CurrentUser,
+} from "@/lib/api";
 
 export default function Home() {
   const [user, setUser] = useState<CurrentUser | null | "loading">("loading");
+  const [branding, setBranding] = useState<BrandingConfig | null>(null);
   const [dark, setDark] = useState(false);
 
   useEffect(() => {
     fetchCurrentUser()
       .then(setUser)
       .catch(() => setUser(null));
+    fetchBrandingConfig().then(setBranding);
   }, []);
 
   useEffect(() => {
     document.documentElement.classList.toggle("dark", dark);
   }, [dark]);
 
+  const displayName = branding?.org_display_name || "Project Misty";
+  const logoInitial = displayName.charAt(0).toUpperCase();
+
   return (
     <main className="flex flex-1 items-center justify-center bg-background p-8">
       <div className="w-full max-w-sm rounded-2xl border border-border bg-card p-8 text-card-foreground shadow-sm">
-        <div className="mb-6 flex h-12 w-12 items-center justify-center rounded-xl bg-primary text-primary-foreground font-semibold">
-          M
-        </div>
-        <h1 className="text-xl font-semibold">Project Misty</h1>
+        {branding?.logo_url ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={branding.logo_url}
+            alt={displayName}
+            className="mb-6 h-12 w-12 rounded-xl object-cover"
+          />
+        ) : (
+          <div className="mb-6 flex h-12 w-12 items-center justify-center rounded-xl bg-primary text-primary-foreground font-semibold">
+            {logoInitial}
+          </div>
+        )}
+        <h1 className="text-xl font-semibold">{displayName}</h1>
         <p className="mt-1 text-sm text-muted-foreground">AI governance hub</p>
 
         {user === "loading" && (

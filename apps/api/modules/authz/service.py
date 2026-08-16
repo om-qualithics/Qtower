@@ -9,6 +9,7 @@ if TYPE_CHECKING:
 _PERMISSIONS: dict[str, dict[str, set[str] | None]] = {
     "identity.view_self": {"system_role": None, "business_role": None},
     "identity.manage_sso": {"system_role": {"admin", "super_admin"}, "business_role": None},
+    "branding.manage": {"system_role": {"admin", "super_admin"}, "business_role": None},
     "tools.approve_request": {"system_role": None, "business_role": {"govern", "assure"}},
 }
 

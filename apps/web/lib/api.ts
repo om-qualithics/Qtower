@@ -29,3 +29,19 @@ export async function fetchCurrentUser(): Promise<CurrentUser | null> {
 export function loginUrl(): string {
   return `${API_BASE_URL}/identity/login`;
 }
+
+export type BrandingConfig = {
+  org_display_name: string | null;
+  logo_url: string | null;
+  primary_color: string | null;
+  secondary_color: string | null;
+  enabled_feature_modules: string[] | null;
+};
+
+export async function fetchBrandingConfig(): Promise<BrandingConfig | null> {
+  const res = await fetch(`${API_BASE_URL}/branding/config`);
+  if (!res.ok) {
+    return null;
+  }
+  return res.json();
+}

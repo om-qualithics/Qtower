@@ -1,10 +1,21 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from apps.api.core.settings import settings
+from apps.api.modules.branding.router import router as branding_router
 from apps.api.modules.identity.router import router as identity_router
+from apps.api.modules.licensing.service import sync_license_on_boot
 
-app = FastAPI(title="Project Misty API")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    sync_license_on_boot()
+    yield
+
+
+app = FastAPI(title="Project Misty API", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -15,6 +26,7 @@ app.add_middleware(
 )
 
 app.include_router(identity_router)
+app.include_router(branding_router)
 
 
 @app.get("/health")
