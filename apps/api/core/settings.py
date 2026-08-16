@@ -15,6 +15,8 @@ class Settings(BaseSettings):
 
     database_url: str = "postgresql+psycopg://misty_app:changeme-app@localhost:5432/misty"
     migrations_database_url: str = "postgresql+psycopg://misty:changeme@localhost:5432/misty"
+    db_pool_size: int = 5
+    db_max_overflow: int = 10
     redis_url: str = "redis://localhost:6379/0"
 
     minio_endpoint: str = "http://localhost:9000"
@@ -27,8 +29,15 @@ class Settings(BaseSettings):
     api_public_url: str = "http://localhost:8000"
     web_public_url: str = "http://localhost:3000"
 
+    # "mock" (default, no external calls) or "live" (routes through LiteLLM
+    # to whichever real vendor ai_model names).
     ai_provider: str = "mock"
-    anthropic_api_key: str = ""
+    # LiteLLM model string, e.g. "anthropic/claude-sonnet-5", "openai/gpt-4o",
+    # "gemini/gemini-2.0-flash" - the prefix selects the vendor SDK LiteLLM
+    # calls under the hood. Swapping vendors is just changing this string
+    # plus ai_api_key, no code change.
+    ai_model: str = "anthropic/claude-sonnet-5"
+    ai_api_key: str = ""
 
     jackson_base_url: str = "http://localhost:5225"
     jackson_api_keys: str = ""

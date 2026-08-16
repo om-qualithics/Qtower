@@ -5,6 +5,7 @@ from sqlalchemy import engine_from_config, pool
 
 from apps.api.core.db import Base
 from apps.api.core.settings import settings
+from apps.api.modules.ai_gateway import models as ai_gateway_models  # noqa: F401
 from apps.api.modules.branding import models as branding_models  # noqa: F401
 from apps.api.modules.identity import models as identity_models  # noqa: F401
 
