@@ -6,6 +6,7 @@ Policy_Builder.docx
 ~$*.docx
 Design/
 aboutproject.md
+policy_builder.md
 
 # Environment / secrets
 .env

@@ -68,6 +68,12 @@ export default function Home() {
                 {user.business_role} &middot; {user.system_role}
               </p>
             </div>
+            <a
+              href="/policy"
+              className="block w-full rounded-lg bg-primary px-4 py-2 text-center text-sm font-medium text-primary-foreground transition hover:opacity-90"
+            >
+              Go to AI Policy
+            </a>
             <form action={`${API_BASE_URL}/identity/logout`} method="post">
               <button
                 type="submit"
