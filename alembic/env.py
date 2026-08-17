@@ -8,6 +8,7 @@ from apps.api.core.settings import settings
 from apps.api.modules.ai_gateway import models as ai_gateway_models  # noqa: F401
 from apps.api.modules.branding import models as branding_models  # noqa: F401
 from apps.api.modules.identity import models as identity_models  # noqa: F401
+from apps.api.modules.policy import models as policy_models  # noqa: F401
 
 config = context.config
 config.set_main_option("sqlalchemy.url", settings.migrations_database_url)

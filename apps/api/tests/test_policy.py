@@ -1,0 +1,108 @@
+import io
+import uuid
+from datetime import datetime, timezone
+
+import docx
+import pytest
+
+from apps.api.core.db import SessionLocal, org_scoped_session
+from apps.api.modules.identity.models import Org
+from apps.api.modules.policy import docgen, service
+from apps.api.modules.policy.models import Policy
+from apps.api.modules.policy.questions import default_answers
+from apps.api.modules.policy.service import PolicyValidationError
+
+
+def _make_org(name: str) -> Org:
+    db = SessionLocal()
+    try:
+        org = Org(name=name)
+        db.add(org)
+        db.commit()
+        db.refresh(org)
+        return org
+    finally:
+        db.close()
+
+
+def _delete_org(org: Org) -> None:
+    with org_scoped_session(str(org.id)) as db:
+        db.query(Policy).filter(Policy.org_id == org.id).delete(synchronize_session=False)
+    db = SessionLocal()
+    try:
+        db.query(Org).filter(Org.id == org.id).delete(synchronize_session=False)
+        db.commit()
+    finally:
+        db.close()
+
+
+def test_render_places_answers_at_the_right_insertion_points() -> None:
+    """Hits the real MinIO-seeded template (same pattern as test_rls.py
+    hitting a real Postgres) since this is the actual proof that the
+    ~20 insertion points land correctly - a mock template would only
+    prove the code runs, not that it's correct."""
+    org = Org(id=uuid.uuid4(), name="Render Test Org")
+    answers = default_answers()
+    answers["q2_1_governance_owner"]["rows"] = [{"name": "Jane Doe", "title": "Chief AI Officer"}]
+    answers["q2_4_approvers"]["rows"] = [{"name": "John Smith", "title": "CEO"}]
+    answers["q3_9_default_tier"]["selected"] = "restricted"
+    answers["q1_2_ai_systems"]["other"].append("Custom internal AI copilot")
+
+    policy = Policy(
+        id=uuid.uuid4(),
+        org_id=org.id,
+        status="draft",
+        current_step=7,
+        policy_owner_name="Jane Doe",
+        approver_name="John Smith",
+        answers=answers,
+        version=1,
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+
+    result = docgen.render(org, policy)
+    doc = docx.Document(io.BytesIO(result))
+
+    metadata_table = doc.tables[1]
+    assert metadata_table.rows[0].cells[1].text == "Render Test Org"
+    assert metadata_table.rows[1].cells[1].text == "Jane Doe"
+    assert metadata_table.rows[2].cells[1].text == "John Smith"
+
+    body_text = "\n".join(p.text for p in doc.paragraphs)
+    assert "Custom internal AI copilot" in body_text
+    assert "Fulltime employees" in body_text
+
+    # governance owner subdoc table landed as a real table with the right content
+    owner_tables = [t for t in doc.tables if t.rows[0].cells[0].text == "Name" and "Jane Doe" in t.rows[1].cells[0].text]
+    assert len(owner_tables) == 1
+
+    # oversight row-loop table has all 8 default rows
+    oversight_table = next(t for t in doc.tables if t.rows[0].cells[0].text == "Context")
+    assert len(oversight_table.rows) == 9  # header + 8 rows
+
+    # ampersand in a checklist label survives (autoescape regression check)
+    tier_table = next(t for t in doc.tables if t.rows[0].cells[0].text == "Tier")
+    assert "M&A activity" in tier_table.rows[2].cells[2].text
+
+
+def test_generate_rejects_incomplete_draft() -> None:
+    org = _make_org("Policy Validation Test Org")
+    try:
+        with org_scoped_session(str(org.id)) as db:
+            policy = Policy(org_id=org.id, answers=default_answers())
+            db.add(policy)
+            db.flush()
+            db.refresh(policy)
+            policy_id = str(policy.id)
+
+        with pytest.raises(PolicyValidationError) as exc_info:
+            service.generate(org, policy_id)
+
+        assert "policy_owner_name" in exc_info.value.missing_required
+        assert "approver_name" in exc_info.value.missing_required
+        assert "q2_1_governance_owner" in exc_info.value.missing_required
+        assert "q2_4_approvers" in exc_info.value.missing_required
+        assert "q3_9_default_tier" in exc_info.value.missing_required
+    finally:
+        _delete_org(org)

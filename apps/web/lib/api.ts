@@ -45,3 +45,125 @@ export async function fetchBrandingConfig(): Promise<BrandingConfig | null> {
   }
   return res.json();
 }
+
+// --- AI Policy builder ---
+
+export type Option = { value: string; label: string; checked_by_default: boolean };
+export type Column = { key: string; label: string };
+
+export type QuestionType = "checklist" | "single_select" | "text" | "table";
+
+export type Question = {
+  key: string;
+  type: QuestionType;
+  label: string;
+  required: boolean;
+  options: Option[];
+  allow_other: boolean;
+  category: string | null;
+  columns: Column[];
+  initial_rows: Record<string, string>[];
+  addable: boolean;
+  locked_rows: boolean;
+};
+
+export type PolicyStep = { id: number; title: string; questions: Question[] };
+
+export type ChecklistAnswer = { selected: string[]; other: string[] };
+export type TableAnswer = { rows: Record<string, string>[] };
+export type SingleSelectAnswer = { selected: string | null };
+export type TextAnswer = { value: string };
+export type AnswerValue = ChecklistAnswer | TableAnswer | SingleSelectAnswer | TextAnswer;
+export type Answers = Record<string, AnswerValue>;
+
+export type Policy = {
+  id: string;
+  status: "draft" | "generated";
+  current_step: number;
+  version: number;
+  policy_owner_name: string | null;
+  approver_name: string | null;
+  answers: Answers;
+  generated_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type PolicyListItem = Omit<Policy, "answers" | "approver_name">;
+
+export class PolicyGenerateValidationError extends Error {
+  missingRequired: string[];
+  constructor(missingRequired: string[]) {
+    super("Policy is missing required answers");
+    this.missingRequired = missingRequired;
+  }
+}
+
+export async function fetchPolicySteps(): Promise<PolicyStep[]> {
+  const res = await fetch(`${API_BASE_URL}/policy/questions`, { credentials: "include" });
+  if (!res.ok) {
+    throw new Error(`Failed to fetch policy questions: ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function listPolicies(): Promise<PolicyListItem[]> {
+  const res = await fetch(`${API_BASE_URL}/policy/`, { credentials: "include" });
+  if (!res.ok) {
+    throw new Error(`Failed to list policies: ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function createPolicy(): Promise<Policy> {
+  const res = await fetch(`${API_BASE_URL}/policy/`, { method: "POST", credentials: "include" });
+  if (!res.ok) {
+    throw new Error(`Failed to create policy: ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function getPolicy(id: string): Promise<Policy> {
+  const res = await fetch(`${API_BASE_URL}/policy/${id}`, { credentials: "include" });
+  if (!res.ok) {
+    throw new Error(`Failed to fetch policy: ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function savePolicyStep(id: string, step: number, answers: Answers): Promise<Policy> {
+  const res = await fetch(`${API_BASE_URL}/policy/${id}`, {
+    method: "PATCH",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ step, answers }),
+  });
+  if (!res.ok) {
+    throw new Error(`Failed to save policy step: ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function generatePolicy(id: string): Promise<Policy> {
+  const res = await fetch(`${API_BASE_URL}/policy/${id}/generate`, {
+    method: "POST",
+    credentials: "include",
+  });
+  if (res.status === 400) {
+    const body = await res.json();
+    throw new PolicyGenerateValidationError(body.detail?.missing_required ?? []);
+  }
+  if (!res.ok) {
+    throw new Error(`Failed to generate policy: ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function getPolicyDownloadUrl(id: string): Promise<string> {
+  const res = await fetch(`${API_BASE_URL}/policy/${id}/download`, { credentials: "include" });
+  if (!res.ok) {
+    throw new Error(`Failed to get download link: ${res.status}`);
+  }
+  const body = await res.json();
+  return body.download_url;
+}
