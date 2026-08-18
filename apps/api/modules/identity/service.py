@@ -3,7 +3,7 @@ from datetime import datetime, timedelta, timezone
 
 import httpx
 import jwt
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from apps.api.core.db import SessionLocal, org_scoped_session
 from apps.api.core.settings import settings
@@ -160,7 +160,16 @@ def handle_callback(org: Org, code: str) -> User:
     with org_scoped_session(str(org.id)) as db:
         user = db.scalars(select(User).where(User.org_id == org.id, User.email == email)).first()
         if user is None:
+            # Bootstrap: the very first person to ever sign in to a fresh org
+            # has no one else who could grant them access, so they become the
+            # org's owner (govern + admin) outright. role_source="manual" so a
+            # later SCIM sync never silently downgrades them.
+            is_first_user = db.scalar(select(func.count()).select_from(User).where(User.org_id == org.id)) == 0
             user = User(org_id=org.id, email=email, idp_subject=idp_subject)
+            if is_first_user:
+                user.business_role = "govern"
+                user.system_role = "admin"
+                user.role_source = "manual"
             db.add(user)
             db.flush()
         else:

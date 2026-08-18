@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
-  API_BASE_URL,
   fetchBrandingConfig,
   fetchCurrentUser,
   loginUrl,
@@ -11,22 +11,29 @@ import {
 } from "@/lib/api";
 
 export default function Home() {
+  const router = useRouter();
   const [user, setUser] = useState<CurrentUser | null | "loading">("loading");
   const [branding, setBranding] = useState<BrandingConfig | null>(null);
   const [dark, setDark] = useState(false);
 
   useEffect(() => {
     fetchCurrentUser()
-      .then(setUser)
+      .then((u) => {
+        if (u) {
+          router.replace("/dashboard");
+          return;
+        }
+        setUser(u);
+      })
       .catch(() => setUser(null));
     fetchBrandingConfig().then(setBranding);
-  }, []);
+  }, [router]);
 
   useEffect(() => {
     document.documentElement.classList.toggle("dark", dark);
   }, [dark]);
 
-  const displayName = branding?.org_display_name || "Project Misty";
+  const displayName = branding?.org_display_name || "Q Tower";
   const logoInitial = displayName.charAt(0).toUpperCase();
 
   return (
@@ -47,7 +54,7 @@ export default function Home() {
         <h1 className="text-xl font-semibold">{displayName}</h1>
         <p className="mt-1 text-sm text-muted-foreground">AI governance hub</p>
 
-        {user === "loading" && (
+        {(user === "loading") && (
           <p className="mt-8 text-sm text-muted-foreground">Checking session...</p>
         )}
 
@@ -58,31 +65,6 @@ export default function Home() {
           >
             Sign in
           </a>
-        )}
-
-        {user && user !== "loading" && (
-          <div className="mt-8 space-y-4">
-            <div>
-              <p className="text-sm font-medium">{user.email}</p>
-              <p className="mt-1 text-xs text-muted-foreground">
-                {user.business_role} &middot; {user.system_role}
-              </p>
-            </div>
-            <a
-              href="/policy"
-              className="block w-full rounded-lg bg-primary px-4 py-2 text-center text-sm font-medium text-primary-foreground transition hover:opacity-90"
-            >
-              Go to AI Policy
-            </a>
-            <form action={`${API_BASE_URL}/identity/logout`} method="post">
-              <button
-                type="submit"
-                className="w-full rounded-lg border border-border bg-secondary px-4 py-2 text-sm font-medium text-secondary-foreground transition hover:bg-muted"
-              >
-                Sign out
-              </button>
-            </form>
-          </div>
         )}
 
         <button

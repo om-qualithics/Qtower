@@ -11,6 +11,7 @@ export default function PolicyListPage() {
   const router = useRouter();
   const [policies, setPolicies] = useState<PolicyListItem[] | "loading">("loading");
   const [creating, setCreating] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     listPolicies()
@@ -20,9 +21,12 @@ export default function PolicyListPage() {
 
   const startNewPolicy = async () => {
     setCreating(true);
+    setError(null);
     try {
       const policy = await createPolicy();
       router.push(`/policy/new?id=${policy.id}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Something went wrong.");
     } finally {
       setCreating(false);
     }
@@ -46,6 +50,12 @@ export default function PolicyListPage() {
           <Plus /> New Policy
         </Button>
       </div>
+
+      {error && (
+        <div className="mb-4 rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
+          {error}
+        </div>
+      )}
 
       {policies === "loading" && <p className="text-sm text-muted-foreground">Loading...</p>}
 

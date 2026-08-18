@@ -73,9 +73,28 @@ def test_render_places_answers_at_the_right_insertion_points() -> None:
     assert "Custom internal AI copilot" in body_text
     assert "Fulltime employees" in body_text
 
+    # org name substituted inline, mid-sentence, in section 1.1 (not a
+    # whole-paragraph placeholder like the checklist blocks are)
+    assert 'Render Test Org (the "Organization") is committed' in body_text
+    # default tier substituted inline in section 4.2, as its human label
+    # ("Restricted"), not the raw stored slug ("restricted")
+    assert "If uncertain about the tier — Restricted" in body_text
+
+    # cover block: version/effective date/next review (+1 year) all landed
+    cover_text = doc.tables[0].rows[0].cells[0].text
+    assert "Version 1" in cover_text
+    assert "Next Review:" in cover_text
+
     # governance owner subdoc table landed as a real table with the right content
     owner_tables = [t for t in doc.tables if t.rows[0].cells[0].text == "Name" and "Jane Doe" in t.rows[1].cells[0].text]
     assert len(owner_tables) == 1
+
+    # optional dept-leads/legal-lead sections are left empty by default -
+    # their whole subsection (heading included) must be omitted entirely
+    assert "3.2" not in body_text
+    assert "Department AI Leads" not in body_text
+    assert "3.3" not in body_text
+    assert "Legal & Compliance Lead" not in body_text
 
     # oversight row-loop table has all 8 default rows
     oversight_table = next(t for t in doc.tables if t.rows[0].cells[0].text == "Context")
@@ -84,6 +103,43 @@ def test_render_places_answers_at_the_right_insertion_points() -> None:
     # ampersand in a checklist label survives (autoescape regression check)
     tier_table = next(t for t in doc.tables if t.rows[0].cells[0].text == "Tier")
     assert "M&A activity" in tier_table.rows[2].cells[2].text
+
+
+def test_optional_governance_sections_appear_when_filled() -> None:
+    """3.2 (Department AI Leads) and 3.3 (Legal & Compliance Lead) are
+    conditionally included - present with a real table when answered,
+    completely absent (heading and all) when left blank. This covers the
+    "present" half; the default-answers render above covers "absent"."""
+    org = Org(id=uuid.uuid4(), name="Optional Sections Org")
+    answers = default_answers()
+    answers["q2_1_governance_owner"]["rows"] = [{"name": "Jane Doe", "title": "Chief AI Officer"}]
+    answers["q2_4_approvers"]["rows"] = [{"name": "John Smith", "title": "CEO"}]
+    answers["q3_9_default_tier"]["selected"] = "restricted"
+    answers["q2_2_dept_leads"]["rows"] = [{"name": "Sam Lee", "department": "Engineering", "title": "Eng AI Lead"}]
+    answers["q2_3_legal_lead"]["rows"] = [{"name": "Pat Wong", "department": "Legal", "title": "General Counsel"}]
+
+    policy = Policy(
+        id=uuid.uuid4(),
+        org_id=org.id,
+        status="draft",
+        policy_owner_name="Jane Doe",
+        approver_name="John Smith",
+        answers=answers,
+        version=1,
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+
+    result = docgen.render(org, policy)
+    doc = docx.Document(io.BytesIO(result))
+    body_text = "\n".join(p.text for p in doc.paragraphs)
+
+    assert "3.2  Department AI Leads" in body_text
+    assert "3.3  Legal & Compliance Lead" in body_text
+    dept_tables = [t for t in doc.tables if t.rows[0].cells[0].text == "Name" and "Sam Lee" in t.rows[1].cells[0].text]
+    legal_tables = [t for t in doc.tables if t.rows[0].cells[0].text == "Name" and "Pat Wong" in t.rows[1].cells[0].text]
+    assert len(dept_tables) == 1
+    assert len(legal_tables) == 1
 
 
 def test_generate_rejects_incomplete_draft() -> None:

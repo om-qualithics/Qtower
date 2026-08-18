@@ -36,7 +36,7 @@ def generate_license(org_name: str, seat_count: int, days: int, enabled_modules:
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Generate a signed Project Misty license token")
+    parser = argparse.ArgumentParser(description="Generate a signed Q Tower license token")
     parser.add_argument("org_name")
     parser.add_argument("--seats", type=int, default=10)
     parser.add_argument("--days", type=int, default=365)

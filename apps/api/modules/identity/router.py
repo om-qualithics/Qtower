@@ -70,7 +70,7 @@ def callback(
     user = identity_service.handle_callback(org, code)
     token = identity_service.issue_session_token(user)
 
-    redirect = RedirectResponse(f"{settings.web_public_url}/")
+    redirect = RedirectResponse(f"{settings.web_public_url}/dashboard")
     redirect.delete_cookie(_STATE_COOKIE_NAME)
     redirect.set_cookie(
         identity_service.SESSION_COOKIE_NAME,

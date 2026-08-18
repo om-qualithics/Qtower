@@ -4,7 +4,7 @@ Context variable names here MUST match that script's tag placement
 exactly - see the plan's "Context variable map" for the full contract.
 """
 import io
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from docxtpl import DocxTemplate
 
@@ -55,6 +55,14 @@ def _severity_value(answers: dict, level: str, field: str) -> str:
         if row.get("level") == level:
             return row.get(field, "") or ""
     return ""
+
+
+def _single_select_label(question: Question, answer: dict) -> str:
+    selected = answer.get("selected")
+    for option in question.options:
+        if option.value == selected:
+            return option.label
+    return "Not specified."
 
 
 def _bullet_subdoc(tpl: DocxTemplate, items: list[str]):
@@ -134,7 +142,11 @@ def render(org: Org, policy: Policy) -> bytes:
         "approver_name": policy.approver_name or "",
         "effective_date": now.strftime("%B %d, %Y"),
         "review_date": now.strftime("%B %d, %Y"),
+        "next_review_date": (now + timedelta(days=365)).strftime("%B %d, %Y"),
         "version": str(policy.version),
+        "default_tier": _single_select_label(_QUESTIONS_BY_KEY["q3_9_default_tier"], answers.get("q3_9_default_tier", {})),
+        "dept_leads_rows": answers.get("q2_2_dept_leads", {}).get("rows", []),
+        "legal_lead_rows": answers.get("q2_3_legal_lead", {}).get("rows", []),
         "scope_who_applies_block": _bullet_subdoc(
             tpl, _selected_labels(_QUESTIONS_BY_KEY["q1_1_who_applies"], answers.get("q1_1_who_applies", {}))
         ),

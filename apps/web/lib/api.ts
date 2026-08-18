@@ -99,35 +99,44 @@ export class PolicyGenerateValidationError extends Error {
   }
 }
 
+export class PermissionDeniedError extends Error {
+  constructor() {
+    super(
+      "Your account doesn't have permission to manage AI policies. Ask an org admin to grant you the " +
+        "\"govern\" role, or sign in with an account that already has it."
+    );
+  }
+}
+
+async function throwIfNotOk(res: Response, action: string): Promise<void> {
+  if (res.ok) return;
+  if (res.status === 403) {
+    throw new PermissionDeniedError();
+  }
+  throw new Error(`${action}: ${res.status}`);
+}
+
 export async function fetchPolicySteps(): Promise<PolicyStep[]> {
   const res = await fetch(`${API_BASE_URL}/policy/questions`, { credentials: "include" });
-  if (!res.ok) {
-    throw new Error(`Failed to fetch policy questions: ${res.status}`);
-  }
+  await throwIfNotOk(res, "Failed to fetch policy questions");
   return res.json();
 }
 
 export async function listPolicies(): Promise<PolicyListItem[]> {
   const res = await fetch(`${API_BASE_URL}/policy/`, { credentials: "include" });
-  if (!res.ok) {
-    throw new Error(`Failed to list policies: ${res.status}`);
-  }
+  await throwIfNotOk(res, "Failed to list policies");
   return res.json();
 }
 
 export async function createPolicy(): Promise<Policy> {
   const res = await fetch(`${API_BASE_URL}/policy/`, { method: "POST", credentials: "include" });
-  if (!res.ok) {
-    throw new Error(`Failed to create policy: ${res.status}`);
-  }
+  await throwIfNotOk(res, "Failed to create policy");
   return res.json();
 }
 
 export async function getPolicy(id: string): Promise<Policy> {
   const res = await fetch(`${API_BASE_URL}/policy/${id}`, { credentials: "include" });
-  if (!res.ok) {
-    throw new Error(`Failed to fetch policy: ${res.status}`);
-  }
+  await throwIfNotOk(res, "Failed to fetch policy");
   return res.json();
 }
 
@@ -138,9 +147,7 @@ export async function savePolicyStep(id: string, step: number, answers: Answers)
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ step, answers }),
   });
-  if (!res.ok) {
-    throw new Error(`Failed to save policy step: ${res.status}`);
-  }
+  await throwIfNotOk(res, "Failed to save policy step");
   return res.json();
 }
 
@@ -153,17 +160,13 @@ export async function generatePolicy(id: string): Promise<Policy> {
     const body = await res.json();
     throw new PolicyGenerateValidationError(body.detail?.missing_required ?? []);
   }
-  if (!res.ok) {
-    throw new Error(`Failed to generate policy: ${res.status}`);
-  }
+  await throwIfNotOk(res, "Failed to generate policy");
   return res.json();
 }
 
 export async function getPolicyDownloadUrl(id: string): Promise<string> {
   const res = await fetch(`${API_BASE_URL}/policy/${id}/download`, { credentials: "include" });
-  if (!res.ok) {
-    throw new Error(`Failed to get download link: ${res.status}`);
-  }
+  await throwIfNotOk(res, "Failed to get download link");
   const body = await res.json();
   return body.download_url;
 }

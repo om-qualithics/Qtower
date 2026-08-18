@@ -18,7 +18,7 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="Project Misty API", lifespan=lifespan)
+app = FastAPI(title="Q Tower API", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,

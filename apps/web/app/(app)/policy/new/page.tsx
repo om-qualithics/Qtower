@@ -34,6 +34,7 @@ function PolicyWizard() {
   const [generating, setGenerating] = useState(false);
   const [missingRequired, setMissingRequired] = useState<string[]>([]);
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!policyId) return;
@@ -78,30 +79,42 @@ function PolicyWizard() {
 
   const goNext = async () => {
     setMissingRequired([]);
-    if (isLastStep) {
-      await saveCurrentStep(currentStep);
-      setGenerating(true);
-      try {
-        await generatePolicy(policyId);
-        const url = await getPolicyDownloadUrl(policyId);
-        setDownloadUrl(url);
-      } catch (err) {
-        if (err instanceof PolicyGenerateValidationError) {
-          setMissingRequired(err.missingRequired);
+    setError(null);
+    try {
+      if (isLastStep) {
+        await saveCurrentStep(currentStep);
+        setGenerating(true);
+        try {
+          await generatePolicy(policyId);
+          const url = await getPolicyDownloadUrl(policyId);
+          setDownloadUrl(url);
+        } catch (err) {
+          if (err instanceof PolicyGenerateValidationError) {
+            setMissingRequired(err.missingRequired);
+          } else {
+            throw err;
+          }
+        } finally {
+          setGenerating(false);
         }
-      } finally {
-        setGenerating(false);
+      } else {
+        await saveCurrentStep(currentStep + 1);
+        setCurrentStep((s) => s + 1);
       }
-    } else {
-      await saveCurrentStep(currentStep + 1);
-      setCurrentStep((s) => s + 1);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Something went wrong.");
     }
   };
 
   const goBack = async () => {
-    const resumeStep = Math.max(1, currentStep - 1);
-    await saveCurrentStep(resumeStep);
-    setCurrentStep(resumeStep);
+    setError(null);
+    try {
+      const resumeStep = Math.max(1, currentStep - 1);
+      await saveCurrentStep(resumeStep);
+      setCurrentStep(resumeStep);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Something went wrong.");
+    }
   };
 
   if (downloadUrl) {
@@ -135,6 +148,12 @@ function PolicyWizard() {
 
       <div className="rounded-2xl border border-border bg-card p-6">
         <h2 className="mb-4 text-lg font-semibold">{step.title}</h2>
+
+        {error && (
+          <div className="mb-4 rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
+            {error}
+          </div>
+        )}
 
         {missingRequired.length > 0 && (
           <div className="mb-4 rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">

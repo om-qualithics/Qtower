@@ -14,7 +14,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Project Misty",
+  title: "Q Tower",
   description: "AI governance hub",
 };
 

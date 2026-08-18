@@ -21,7 +21,7 @@ import {
 } from "@/lib/api";
 
 const NAV_ITEMS = [
-  { label: "Dashboard", href: "/", icon: LayoutDashboard, enabled: true },
+  { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard, enabled: true },
   { label: "AI Policy", href: "/policy", icon: ScrollText, enabled: true },
   { label: "AI Tools", href: null, icon: Grid3x3, enabled: false },
   { label: "Raise Alert", href: null, icon: AlertTriangle, enabled: false },
@@ -47,20 +47,20 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     fetchBrandingConfig().then(setBranding);
   }, [router]);
 
-  const displayName = branding?.org_display_name || "Project Misty";
+  const displayName = branding?.org_display_name || "Q Tower";
   const logoInitial = displayName.charAt(0).toUpperCase();
 
   if (user === "loading" || user === null) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-background">
+      <div className="flex h-screen items-center justify-center bg-background">
         <p className="text-sm text-muted-foreground">Loading...</p>
       </div>
     );
   }
 
   return (
-    <div className="flex min-h-screen bg-background">
-      <aside className="flex w-64 shrink-0 flex-col border-r border-sidebar-border bg-sidebar px-4 py-6">
+    <div className="flex h-screen overflow-hidden bg-background">
+      <aside className="flex h-full w-64 shrink-0 flex-col border-r border-sidebar-border bg-sidebar px-4 py-6">
         <div className="mb-8 flex items-center gap-3 px-2">
           {branding?.logo_url ? (
             // eslint-disable-next-line @next/next/no-img-element
