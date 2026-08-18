@@ -16,6 +16,10 @@ _PERMISSIONS: dict[str, list[dict[str, set[str] | None]]] = {
     "branding.manage": [{"system_role": {"admin", "super_admin"}, "business_role": None}],
     "tools.approve_request": [{"system_role": None, "business_role": {"govern", "assure"}}],
     "policy.manage": [
+        {"system_role": None, "business_role": {"govern", "assure"}},
+        {"system_role": {"admin", "super_admin"}, "business_role": None},
+    ],
+    "policy.approve": [
         {"system_role": None, "business_role": {"govern"}},
         {"system_role": {"admin", "super_admin"}, "business_role": None},
     ],

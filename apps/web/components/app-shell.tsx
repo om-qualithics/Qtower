@@ -10,15 +10,20 @@ import {
   AlertTriangle,
   GraduationCap,
   Settings,
+  LogOut,
+  Moon,
+  Sun,
 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import {
+  API_BASE_URL,
   fetchBrandingConfig,
   fetchCurrentUser,
   type BrandingConfig,
   type CurrentUser,
 } from "@/lib/api";
+import { getStoredDark, setStoredDark } from "@/lib/theme";
 
 const NAV_ITEMS = [
   { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard, enabled: true },
@@ -34,6 +39,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const [user, setUser] = useState<CurrentUser | null | "loading">("loading");
   const [branding, setBranding] = useState<BrandingConfig | null>(null);
+  const [dark, setDark] = useState(false);
 
   useEffect(() => {
     fetchCurrentUser()
@@ -45,6 +51,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       })
       .catch(() => router.replace("/"));
     fetchBrandingConfig().then(setBranding);
+    queueMicrotask(() => setDark(getStoredDark()));
   }, [router]);
 
   const displayName = branding?.org_display_name || "Q Tower";
@@ -109,13 +116,39 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           })}
         </nav>
 
-        <div className="flex items-center gap-3 border-t border-sidebar-border px-2 pt-4">
-          <div className="flex h-9 w-9 items-center justify-center rounded-full bg-primary text-sm font-semibold text-primary-foreground">
-            {user.email.charAt(0).toUpperCase()}
+        <div className="border-t border-sidebar-border pt-4">
+          <div className="flex items-center gap-3 px-2">
+            <div className="flex h-9 w-9 items-center justify-center rounded-full bg-primary text-sm font-semibold text-primary-foreground">
+              {user.email.charAt(0).toUpperCase()}
+            </div>
+            <div className="min-w-0">
+              <p className="truncate text-sm font-medium text-sidebar-foreground">{user.email}</p>
+              <p className="truncate text-xs text-muted-foreground">{user.business_role}</p>
+            </div>
           </div>
-          <div className="min-w-0">
-            <p className="truncate text-sm font-medium text-sidebar-foreground">{user.email}</p>
-            <p className="truncate text-xs text-muted-foreground">{user.business_role}</p>
+
+          <div className="mt-3 flex gap-2 px-2">
+            <button
+              type="button"
+              onClick={() => {
+                const next = !dark;
+                setDark(next);
+                setStoredDark(next);
+              }}
+              title={`Switch to ${dark ? "light" : "dark"} theme`}
+              className="flex h-8 w-8 items-center justify-center rounded-lg text-sidebar-foreground transition-colors hover:bg-sidebar-accent"
+            >
+              {dark ? <Sun className="size-4" /> : <Moon className="size-4" />}
+            </button>
+            <form action={`${API_BASE_URL}/identity/logout`} method="post" className="flex-1">
+              <button
+                type="submit"
+                className="flex h-8 w-full items-center justify-center gap-2 rounded-lg text-sm text-sidebar-foreground transition-colors hover:bg-sidebar-accent"
+              >
+                <LogOut className="size-4" />
+                Sign out
+              </button>
+            </form>
           </div>
         </div>
       </aside>

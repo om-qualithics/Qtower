@@ -6,11 +6,12 @@ import docx
 import pytest
 
 from apps.api.core.db import SessionLocal, org_scoped_session
-from apps.api.modules.identity.models import Org
+from apps.api.modules.identity.models import Org, User
 from apps.api.modules.policy import docgen, service
+from apps.api.modules.policy.constants import MAX_UPLOAD_SIZE_BYTES
 from apps.api.modules.policy.models import Policy
 from apps.api.modules.policy.questions import default_answers
-from apps.api.modules.policy.service import PolicyValidationError
+from apps.api.modules.policy.service import PolicyApprovalError, PolicyUploadError, PolicyValidationError
 
 
 def _make_org(name: str) -> Org:
@@ -25,9 +26,33 @@ def _make_org(name: str) -> Org:
         db.close()
 
 
+def _make_user(org: Org, email: str) -> User:
+    with org_scoped_session(str(org.id)) as db:
+        user = User(org_id=org.id, email=email)
+        db.add(user)
+        db.flush()
+        db.refresh(user)
+        db.expunge(user)
+        return user
+
+
+def _make_policy_with_document(org: Org, *, status: str = "draft") -> Policy:
+    """A policy with a document already attached (storage_key set) without
+    actually rendering/uploading a real docx - approve()'s own logic
+    doesn't care what the bytes are, only that a key is present."""
+    with org_scoped_session(str(org.id)) as db:
+        policy = Policy(org_id=org.id, answers={}, status=status, storage_key="fake/key.docx")
+        db.add(policy)
+        db.flush()
+        db.refresh(policy)
+        db.expunge(policy)
+        return policy
+
+
 def _delete_org(org: Org) -> None:
     with org_scoped_session(str(org.id)) as db:
         db.query(Policy).filter(Policy.org_id == org.id).delete(synchronize_session=False)
+        db.query(User).filter(User.org_id == org.id).delete(synchronize_session=False)
     db = SessionLocal()
     try:
         db.query(Org).filter(Org.id == org.id).delete(synchronize_session=False)
@@ -160,5 +185,92 @@ def test_generate_rejects_incomplete_draft() -> None:
         assert "q2_1_governance_owner" in exc_info.value.missing_required
         assert "q2_4_approvers" in exc_info.value.missing_required
         assert "q3_9_default_tier" in exc_info.value.missing_required
+    finally:
+        _delete_org(org)
+
+
+def test_approve_promotes_draft_and_archives_previous_active() -> None:
+    org = _make_org("Approval Test Org")
+    try:
+        approver = _make_user(org, "approver@example.com")
+        first = _make_policy_with_document(org)
+        second = _make_policy_with_document(org)
+
+        approved_first = service.approve(org, str(first.id), approver)
+        assert approved_first.status == "active"
+        assert approved_first.version == 1
+        assert approved_first.approved_by == approver.id
+
+        approved_second = service.approve(org, str(second.id), approver)
+        assert approved_second.status == "active"
+        assert approved_second.version == 2
+
+        refreshed_first = service.get_policy(org, str(first.id))
+        assert refreshed_first is not None
+        assert refreshed_first.status == "archived"
+    finally:
+        _delete_org(org)
+
+
+def test_approve_rejects_draft_with_no_document() -> None:
+    org = _make_org("Approval Missing Doc Org")
+    try:
+        approver = _make_user(org, "approver2@example.com")
+        with org_scoped_session(str(org.id)) as db:
+            policy = Policy(org_id=org.id, answers={})
+            db.add(policy)
+            db.flush()
+            db.refresh(policy)
+            policy_id = str(policy.id)
+
+        with pytest.raises(PolicyApprovalError):
+            service.approve(org, policy_id, approver)
+    finally:
+        _delete_org(org)
+
+
+def test_approve_rejects_a_policy_that_is_not_a_draft() -> None:
+    org = _make_org("Approval Already Active Org")
+    try:
+        approver = _make_user(org, "approver3@example.com")
+        policy = _make_policy_with_document(org)
+        service.approve(org, str(policy.id), approver)
+
+        with pytest.raises(PolicyApprovalError):
+            service.approve(org, str(policy.id), approver)
+    finally:
+        _delete_org(org)
+
+
+def test_upload_policy_creates_a_draft_with_source_upload() -> None:
+    org = _make_org("Upload Test Org")
+    try:
+        uploader = _make_user(org, "uploader@example.com")
+        policy = service.upload_policy(org, uploader, "my-policy.docx", b"fake docx bytes")
+
+        assert policy.status == "draft"
+        assert policy.source == "upload"
+        assert policy.storage_key is not None
+        assert policy.generated_at is not None
+    finally:
+        _delete_org(org)
+
+
+def test_upload_policy_rejects_non_docx_filename() -> None:
+    org = _make_org("Upload Rejects Filetype Org")
+    try:
+        uploader = _make_user(org, "uploader2@example.com")
+        with pytest.raises(PolicyUploadError):
+            service.upload_policy(org, uploader, "my-policy.pdf", b"not a docx")
+    finally:
+        _delete_org(org)
+
+
+def test_upload_policy_rejects_oversized_file() -> None:
+    org = _make_org("Upload Rejects Size Org")
+    try:
+        uploader = _make_user(org, "uploader3@example.com")
+        with pytest.raises(PolicyUploadError):
+            service.upload_policy(org, uploader, "my-policy.docx", b"0" * (MAX_UPLOAD_SIZE_BYTES + 1))
     finally:
         _delete_org(org)

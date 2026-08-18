@@ -35,9 +35,17 @@ def test_unknown_action_is_denied_by_default() -> None:
     assert not can(_user("govern", "super_admin"), "nonexistent.action")
 
 
-def test_policy_manage_allows_either_govern_business_role_or_system_admin() -> None:
+def test_policy_manage_allows_govern_assure_or_system_admin() -> None:
     assert can(_user("govern", "user"), "policy.manage")
+    assert can(_user("assure", "user"), "policy.manage")
     assert can(_user("operator", "admin"), "policy.manage")
     assert can(_user("operator", "super_admin"), "policy.manage")
     assert not can(_user("operator", "user"), "policy.manage")
-    assert not can(_user("assure", "user"), "policy.manage")
+
+
+def test_policy_approve_is_stricter_than_manage_assure_cannot_approve() -> None:
+    assert can(_user("govern", "user"), "policy.approve")
+    assert can(_user("operator", "admin"), "policy.approve")
+    assert can(_user("operator", "super_admin"), "policy.approve")
+    assert not can(_user("assure", "user"), "policy.approve")
+    assert not can(_user("operator", "user"), "policy.approve")

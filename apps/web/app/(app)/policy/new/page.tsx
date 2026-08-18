@@ -41,7 +41,7 @@ function PolicyWizard() {
     Promise.all([fetchPolicySteps(), getPolicy(policyId)]).then(([fetchedSteps, policy]) => {
       setSteps(fetchedSteps);
       setAnswers(policy.answers);
-      setCurrentStep(policy.status === "generated" ? fetchedSteps.length : policy.current_step);
+      setCurrentStep(policy.generated_at ? fetchedSteps.length : policy.current_step);
     });
   }, [policyId]);
 
@@ -121,9 +121,10 @@ function PolicyWizard() {
     return (
       <div className="mx-auto max-w-xl text-center">
         <CheckCircle2 className="mx-auto mb-4 size-12 text-primary" />
-        <h1 className="text-xl font-semibold">Your AI Policy is ready</h1>
+        <h1 className="text-xl font-semibold">Your draft is ready for review</h1>
         <p className="mt-2 text-sm text-muted-foreground">
-          The policy has been generated from your answers and is ready to download.
+          The document has been generated from your answers. Download it to review, then approve it
+          from the AI Policy page to make it the live policy.
         </p>
         <div className="mt-6 flex justify-center gap-3">
           <Button render={<a href={downloadUrl}>Download policy</a>} nativeButton={false} />

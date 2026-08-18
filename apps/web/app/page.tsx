@@ -9,6 +9,7 @@ import {
   type BrandingConfig,
   type CurrentUser,
 } from "@/lib/api";
+import { getStoredDark, setStoredDark } from "@/lib/theme";
 
 export default function Home() {
   const router = useRouter();
@@ -27,11 +28,8 @@ export default function Home() {
       })
       .catch(() => setUser(null));
     fetchBrandingConfig().then(setBranding);
+    queueMicrotask(() => setDark(getStoredDark()));
   }, [router]);
-
-  useEffect(() => {
-    document.documentElement.classList.toggle("dark", dark);
-  }, [dark]);
 
   const displayName = branding?.org_display_name || "Q Tower";
   const logoInitial = displayName.charAt(0).toUpperCase();
@@ -69,7 +67,11 @@ export default function Home() {
 
         <button
           type="button"
-          onClick={() => setDark((d) => !d)}
+          onClick={() => {
+            const next = !dark;
+            setDark(next);
+            setStoredDark(next);
+          }}
           className="mt-4 w-full rounded-lg border border-border px-4 py-2 text-xs text-muted-foreground transition hover:bg-muted"
         >
           Toggle {dark ? "light" : "dark"} theme

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Cookie, HTTPException
+from fastapi import APIRouter, Cookie, File, HTTPException, UploadFile
 
 from apps.api.modules.authz import service as authz_service
 from apps.api.modules.identity import service as identity_service
@@ -14,7 +14,7 @@ from apps.api.modules.policy.schemas import (
     QuestionOut,
     StepOut,
 )
-from apps.api.modules.policy.service import PolicyValidationError
+from apps.api.modules.policy.service import PolicyApprovalError, PolicyUploadError, PolicyValidationError
 
 router = APIRouter(prefix="/policy", tags=["policy"])
 
@@ -30,12 +30,15 @@ def _to_policy_out(policy) -> PolicyOut:
     return PolicyOut(
         id=str(policy.id),
         status=policy.status,
+        source=policy.source,
+        has_document=policy.storage_key is not None,
         current_step=policy.current_step,
         version=policy.version,
         policy_owner_name=policy.policy_owner_name,
         approver_name=policy.approver_name,
         answers=policy.answers,
         generated_at=policy.generated_at,
+        approved_at=policy.approved_at,
         created_at=policy.created_at,
         updated_at=policy.updated_at,
     )
@@ -80,10 +83,13 @@ def list_policies(misty_session: str | None = Cookie(default=None)):
         PolicyListItemOut(
             id=str(p.id),
             status=p.status,
+            source=p.source,
+            has_document=p.storage_key is not None,
             current_step=p.current_step,
             version=p.version,
             policy_owner_name=p.policy_owner_name,
             generated_at=p.generated_at,
+            approved_at=p.approved_at,
             created_at=p.created_at,
             updated_at=p.updated_at,
         )
@@ -98,6 +104,20 @@ def create_policy(misty_session: str | None = Cookie(default=None)):
         raise HTTPException(status_code=403, detail="Forbidden")
     org = identity_service.get_org()
     policy = policy_service.create_draft(org, user)
+    return _to_policy_out(policy)
+
+
+@router.post("/upload", response_model=PolicyOut)
+async def upload_policy(file: UploadFile = File(...), misty_session: str | None = Cookie(default=None)):
+    user = _require_user(misty_session)
+    if not authz_service.can(user, "policy.manage"):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    org = identity_service.get_org()
+    file_bytes = await file.read()
+    try:
+        policy = policy_service.upload_policy(org, user, file.filename or "policy.docx", file_bytes)
+    except PolicyUploadError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return _to_policy_out(policy)
 
 
@@ -137,6 +157,19 @@ def generate_policy(policy_id: str, misty_session: str | None = Cookie(default=N
         raise HTTPException(status_code=400, detail={"missing_required": exc.missing_required}) from exc
     if policy is None:
         raise HTTPException(status_code=404, detail="Policy not found")
+    return _to_policy_out(policy)
+
+
+@router.post("/{policy_id}/approve", response_model=PolicyOut)
+def approve_policy(policy_id: str, misty_session: str | None = Cookie(default=None)):
+    user = _require_user(misty_session)
+    if not authz_service.can(user, "policy.approve"):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    org = identity_service.get_org()
+    try:
+        policy = policy_service.approve(org, policy_id, user)
+    except PolicyApprovalError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return _to_policy_out(policy)
 
 

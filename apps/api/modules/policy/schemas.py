@@ -38,12 +38,15 @@ class StepOut(BaseModel):
 class PolicyOut(BaseModel):
     id: str
     status: str
+    source: str
+    has_document: bool
     current_step: int
     version: int
     policy_owner_name: str | None
     approver_name: str | None
     answers: dict[str, Any]
     generated_at: datetime | None
+    approved_at: datetime | None
     created_at: datetime
     updated_at: datetime
 
@@ -51,10 +54,13 @@ class PolicyOut(BaseModel):
 class PolicyListItemOut(BaseModel):
     id: str
     status: str
+    source: str
+    has_document: bool
     current_step: int
     version: int
     policy_owner_name: str | None
     generated_at: datetime | None
+    approved_at: datetime | None
     created_at: datetime
     updated_at: datetime
 

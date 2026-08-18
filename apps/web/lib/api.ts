@@ -76,15 +76,21 @@ export type TextAnswer = { value: string };
 export type AnswerValue = ChecklistAnswer | TableAnswer | SingleSelectAnswer | TextAnswer;
 export type Answers = Record<string, AnswerValue>;
 
+export type PolicyStatus = "draft" | "active" | "archived";
+export type PolicySource = "builder" | "upload";
+
 export type Policy = {
   id: string;
-  status: "draft" | "generated";
+  status: PolicyStatus;
+  source: PolicySource;
+  has_document: boolean;
   current_step: number;
   version: number;
   policy_owner_name: string | null;
   approver_name: string | null;
   answers: Answers;
   generated_at: string | null;
+  approved_at: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -102,8 +108,8 @@ export class PolicyGenerateValidationError extends Error {
 export class PermissionDeniedError extends Error {
   constructor() {
     super(
-      "Your account doesn't have permission to manage AI policies. Ask an org admin to grant you the " +
-        "\"govern\" role, or sign in with an account that already has it."
+      "Your account doesn't have permission to do that. Ask an org admin to grant you the " +
+        "right AI Policy role, or sign in with an account that already has it."
     );
   }
 }
@@ -161,6 +167,31 @@ export async function generatePolicy(id: string): Promise<Policy> {
     throw new PolicyGenerateValidationError(body.detail?.missing_required ?? []);
   }
   await throwIfNotOk(res, "Failed to generate policy");
+  return res.json();
+}
+
+export async function approvePolicy(id: string): Promise<Policy> {
+  const res = await fetch(`${API_BASE_URL}/policy/${id}/approve`, {
+    method: "POST",
+    credentials: "include",
+  });
+  await throwIfNotOk(res, "Failed to approve policy");
+  return res.json();
+}
+
+export async function uploadPolicy(file: File): Promise<Policy> {
+  const formData = new FormData();
+  formData.append("file", file);
+  const res = await fetch(`${API_BASE_URL}/policy/upload`, {
+    method: "POST",
+    credentials: "include",
+    body: formData,
+  });
+  if (res.status === 400) {
+    const body = await res.json();
+    throw new Error(body.detail ?? "Failed to upload policy");
+  }
+  await throwIfNotOk(res, "Failed to upload policy");
   return res.json();
 }
 
