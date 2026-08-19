@@ -118,6 +118,23 @@ def get_user_roles(user: User) -> dict[str, str]:
     return {"business_role": user.business_role, "system_role": user.system_role}
 
 
+def list_user_emails_by_business_role(org: Org, business_roles: set[str]) -> list[str]:
+    with org_scoped_session(str(org.id)) as db:
+        users = db.scalars(
+            select(User).where(User.org_id == org.id, User.business_role.in_(business_roles), User.active.is_(True))
+        ).all()
+        return [u.email for u in users]
+
+
+def get_user_by_id(org: Org, user_id) -> User | None:
+    with org_scoped_session(str(org.id)) as db:
+        user = db.get(User, user_id)
+        if user is None or str(user.org_id) != str(org.id):
+            return None
+        db.expunge(user)
+        return user
+
+
 def _resolve_business_role(db, org_id, idp_group_names: list[str]) -> str | None:
     if not idp_group_names:
         return None

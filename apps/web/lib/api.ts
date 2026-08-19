@@ -89,6 +89,7 @@ export type Policy = {
   policy_owner_name: string | null;
   approver_name: string | null;
   answers: Answers;
+  created_by: string | null;
   generated_at: string | null;
   approved_at: string | null;
   created_at: string;
@@ -200,4 +201,213 @@ export async function getPolicyDownloadUrl(id: string): Promise<string> {
   await throwIfNotOk(res, "Failed to get download link");
   const body = await res.json();
   return body.download_url;
+}
+
+// --- AI Tools ---
+
+export type ToolRequestType = "tool" | "feature" | "webextension";
+export type ToolRequestStatus = "pending" | "approved" | "rejected";
+export type ToolAssessmentStatus = "pending" | "complete" | "failed";
+export type ToolAssessmentResult = "approvable" | "needs_review" | "cannot_approve";
+
+export type ApprovedTool = {
+  id: string;
+  name: string;
+  description: string;
+  source_type: ToolRequestType;
+  access_url: string;
+  allowed_tiers: string[];
+  details: string | null;
+  created_at: string;
+};
+
+export type ToolRequest = {
+  id: string;
+  request_type: ToolRequestType;
+  name: string;
+  link: string;
+  intended_use_case: string;
+  status: ToolRequestStatus;
+  ai_assessment_status: ToolAssessmentStatus;
+  ai_assessment_result: ToolAssessmentResult | null;
+  ai_assessment_explanation: string | null;
+  requested_by: string;
+  requested_by_email: string | null;
+  decided_by: string | null;
+  decided_at: string | null;
+  decision_note: string | null;
+  resulting_tool_id: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export class ToolRequestDuplicateError extends Error {}
+
+export async function fetchApprovedTools(): Promise<ApprovedTool[]> {
+  const res = await fetch(`${API_BASE_URL}/tools/approved`, { credentials: "include" });
+  await throwIfNotOk(res, "Failed to fetch approved tools");
+  return res.json();
+}
+
+export async function createToolRequest(
+  requestType: ToolRequestType,
+  name: string,
+  link: string,
+  intendedUseCase: string
+): Promise<ToolRequest> {
+  const res = await fetch(`${API_BASE_URL}/tools/requests`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ request_type: requestType, name, link, intended_use_case: intendedUseCase }),
+  });
+  if (res.status === 400) {
+    const body = await res.json();
+    throw new ToolRequestDuplicateError(body.detail ?? "This request could not be created");
+  }
+  await throwIfNotOk(res, "Failed to submit tool request");
+  return res.json();
+}
+
+export async function fetchToolRequests(options: { mine?: boolean } = {}): Promise<ToolRequest[]> {
+  const params = options.mine ? "?mine=true" : "";
+  const res = await fetch(`${API_BASE_URL}/tools/requests${params}`, { credentials: "include" });
+  await throwIfNotOk(res, "Failed to fetch tool requests");
+  return res.json();
+}
+
+export async function approveToolRequest(
+  id: string,
+  description: string,
+  allowedTiers: string[]
+): Promise<ToolRequest> {
+  const res = await fetch(`${API_BASE_URL}/tools/requests/${id}/approve`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ description, allowed_tiers: allowedTiers }),
+  });
+  if (res.status === 400) {
+    const body = await res.json();
+    throw new Error(body.detail ?? "Failed to approve request");
+  }
+  await throwIfNotOk(res, "Failed to approve request");
+  return res.json();
+}
+
+export async function updateApprovedTool(
+  id: string,
+  name: string,
+  description: string,
+  accessUrl: string,
+  allowedTiers: string[]
+): Promise<ApprovedTool> {
+  const res = await fetch(`${API_BASE_URL}/tools/approved/${id}`, {
+    method: "PATCH",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name, description, access_url: accessUrl, allowed_tiers: allowedTiers }),
+  });
+  await throwIfNotOk(res, "Failed to update tool");
+  return res.json();
+}
+
+export async function deleteApprovedTool(id: string): Promise<void> {
+  const res = await fetch(`${API_BASE_URL}/tools/approved/${id}`, {
+    method: "DELETE",
+    credentials: "include",
+  });
+  await throwIfNotOk(res, "Failed to delete tool");
+}
+
+export async function rejectToolRequest(id: string, reason?: string): Promise<ToolRequest> {
+  const res = await fetch(`${API_BASE_URL}/tools/requests/${id}/reject`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ reason: reason ?? null }),
+  });
+  if (res.status === 400) {
+    const body = await res.json();
+    throw new Error(body.detail ?? "Failed to reject request");
+  }
+  await throwIfNotOk(res, "Failed to reject request");
+  return res.json();
+}
+
+// --- Escalations ---
+
+export type EscalationCategory = "policy_violation" | "unapproved_tool_use" | "data_exposure_concern" | "other";
+export type EscalationStatus = "open" | "in_review" | "resolved";
+
+export type Escalation = {
+  id: string;
+  category: EscalationCategory;
+  description: string;
+  related_tool_request_id: string | null;
+  related_policy_id: string | null;
+  status: EscalationStatus;
+  reporter_id: string;
+  reporter_email: string | null;
+  assigned_to: string | null;
+  resolution_note: string | null;
+  has_attachment: boolean;
+  attachment_filename: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export async function createEscalation(
+  category: EscalationCategory,
+  description: string,
+  file?: File | null
+): Promise<Escalation> {
+  const formData = new FormData();
+  formData.append("category", category);
+  formData.append("description", description);
+  if (file) formData.append("file", file);
+
+  const res = await fetch(`${API_BASE_URL}/escalations/`, {
+    method: "POST",
+    credentials: "include",
+    body: formData,
+  });
+  if (res.status === 400) {
+    const body = await res.json();
+    throw new Error(body.detail ?? "Failed to submit escalation");
+  }
+  await throwIfNotOk(res, "Failed to submit escalation");
+  return res.json();
+}
+
+export async function getEscalationAttachmentUrl(id: string): Promise<string> {
+  const res = await fetch(`${API_BASE_URL}/escalations/${id}/attachment`, { credentials: "include" });
+  await throwIfNotOk(res, "Failed to get attachment link");
+  const body = await res.json();
+  return body.download_url;
+}
+
+export async function fetchEscalations(options: { mine?: boolean } = {}): Promise<Escalation[]> {
+  const params = options.mine ? "?mine=true" : "";
+  const res = await fetch(`${API_BASE_URL}/escalations/${params}`, { credentials: "include" });
+  await throwIfNotOk(res, "Failed to fetch escalations");
+  return res.json();
+}
+
+export async function updateEscalation(
+  id: string,
+  updates: { status?: EscalationStatus; assigned_to?: string; resolution_note?: string }
+): Promise<Escalation> {
+  const res = await fetch(`${API_BASE_URL}/escalations/${id}`, {
+    method: "PATCH",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(updates),
+  });
+  if (res.status === 400) {
+    const body = await res.json();
+    throw new Error(body.detail ?? "Failed to update escalation");
+  }
+  await throwIfNotOk(res, "Failed to update escalation");
+  return res.json();
 }

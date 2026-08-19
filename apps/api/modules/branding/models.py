@@ -24,6 +24,7 @@ class DeploymentConfig(Base):
     primary_color: Mapped[str | None] = mapped_column(String(32), nullable=True)
     secondary_color: Mapped[str | None] = mapped_column(String(32), nullable=True)
     email_templates: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    escalation_notify_override_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     license_token: Mapped[str | None] = mapped_column(Text, nullable=True)
     license_seat_count: Mapped[int | None] = mapped_column(Integer, nullable=True)

@@ -45,6 +45,7 @@ class PolicyOut(BaseModel):
     policy_owner_name: str | None
     approver_name: str | None
     answers: dict[str, Any]
+    created_by: str | None
     generated_at: datetime | None
     approved_at: datetime | None
     created_at: datetime
@@ -59,6 +60,7 @@ class PolicyListItemOut(BaseModel):
     current_step: int
     version: int
     policy_owner_name: str | None
+    created_by: str | None
     generated_at: datetime | None
     approved_at: datetime | None
     created_at: datetime

@@ -28,8 +28,8 @@ import { getStoredDark, setStoredDark } from "@/lib/theme";
 const NAV_ITEMS = [
   { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard, enabled: true },
   { label: "AI Policy", href: "/policy", icon: ScrollText, enabled: true },
-  { label: "AI Tools", href: null, icon: Grid3x3, enabled: false },
-  { label: "Raise Alert", href: null, icon: AlertTriangle, enabled: false },
+  { label: "AI Tools", href: "/tools", icon: Grid3x3, enabled: true },
+  { label: "Raise Alert", href: "/escalations", icon: AlertTriangle, enabled: true },
   { label: "Training", href: null, icon: GraduationCap, enabled: false },
   { label: "Settings", href: null, icon: Settings, enabled: false },
 ];

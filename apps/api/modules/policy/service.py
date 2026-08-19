@@ -1,6 +1,8 @@
+import io
 import uuid
 from datetime import datetime, timezone
 
+from docx import Document as DocxReader
 from sqlalchemy import func, select
 
 from apps.api.core import storage
@@ -207,3 +209,25 @@ def get_download_url(org: Org, policy_id: str) -> str | None:
     if policy is None or not policy.storage_key:
         return None
     return storage.presigned_url(policy.storage_key, expires_seconds=300)
+
+
+def get_active_policy_text(org: Org) -> str | None:
+    """Plain-text extraction of the org's live policy document, for feeding
+    into the tools module's AI precheck prompt - not used anywhere in the
+    policy module itself. Returns None if no policy has ever been approved
+    yet, so the caller's prompt can say so explicitly."""
+    with org_scoped_session(str(org.id)) as db:
+        active = db.scalars(select(Policy).where(Policy.org_id == org.id, Policy.status == "active")).first()
+        if active is None or not active.storage_key:
+            return None
+        storage_key = active.storage_key
+
+    docx_bytes = storage.download_bytes(storage_key)
+    document = DocxReader(io.BytesIO(docx_bytes))
+    parts = [p.text for p in document.paragraphs if p.text.strip()]
+    for table in document.tables:
+        for row in table.rows:
+            row_text = " | ".join(cell.text.strip() for cell in row.cells if cell.text.strip())
+            if row_text:
+                parts.append(row_text)
+    return "\n".join(parts)

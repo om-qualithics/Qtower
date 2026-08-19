@@ -46,6 +46,16 @@ class Settings(BaseSettings):
     license_public_key: str = ""
     license_token: str = ""
 
+    # "mock" (default, no real SMTP call - logs to notification_log only) or
+    # "live" (sends via smtplib once smtp_host/smtp_from_address are set).
+    # Same shape as ai_provider/ai_model above.
+    notifications_provider: str = "mock"
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_username: str = ""
+    smtp_password: str = ""
+    smtp_from_address: str = ""
+
     @property
     def license_public_key_pem(self) -> str:
         if not self.license_public_key:

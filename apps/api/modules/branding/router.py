@@ -20,6 +20,7 @@ def get_config():
             primary_color=None,
             secondary_color=None,
             enabled_feature_modules=None,
+            escalation_notify_override_email=None,
         )
     return BrandingConfigOut(
         org_display_name=config.org_display_name,
@@ -27,6 +28,7 @@ def get_config():
         primary_color=config.primary_color,
         secondary_color=config.secondary_color,
         enabled_feature_modules=config.enabled_feature_modules,
+        escalation_notify_override_email=config.escalation_notify_override_email,
     )
 
 
@@ -46,4 +48,5 @@ def update_config(body: BrandingConfigUpdate, misty_session: str | None = Cookie
         primary_color=config.primary_color,
         secondary_color=config.secondary_color,
         enabled_feature_modules=config.enabled_feature_modules,
+        escalation_notify_override_email=config.escalation_notify_override_email,
     )

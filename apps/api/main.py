@@ -6,9 +6,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from apps.api.core import storage
 from apps.api.core.settings import settings
 from apps.api.modules.branding.router import router as branding_router
+from apps.api.modules.escalations.router import router as escalations_router
 from apps.api.modules.identity.router import router as identity_router
 from apps.api.modules.licensing.service import sync_license_on_boot
 from apps.api.modules.policy.router import router as policy_router
+from apps.api.modules.tools.router import router as tools_router
 
 
 @asynccontextmanager
@@ -31,6 +33,8 @@ app.add_middleware(
 app.include_router(identity_router)
 app.include_router(branding_router)
 app.include_router(policy_router)
+app.include_router(tools_router)
+app.include_router(escalations_router)
 
 
 @app.get("/health")
