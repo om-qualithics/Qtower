@@ -76,8 +76,15 @@ services:
       JACKSON_API_KEYS: ${JACKSON_API_KEYS:?JACKSON_API_KEYS is required}
       NEXTAUTH_SECRET: ${JACKSON_NEXTAUTH_SECRET:?JACKSON_NEXTAUTH_SECRET is required}
       NEXTAUTH_ADMIN_CREDENTIALS: ${JACKSON_ADMIN_CREDENTIALS:-}
-      EXTERNAL_URL: http://localhost:${JACKSON_PORT:-5225}
-      NEXTAUTH_URL: http://localhost:${JACKSON_PORT:-5225}
+      # Defaults to plain localhost for the mock-saml dev flow. Override
+      # with a real https:// URL (e.g. a cloudflared/ngrok tunnel, or a
+      # real prod domain) when testing against a real IdP - Google
+      # Workspace (and most real IdPs) require the ACS URL to be https,
+      # and Jackson validates the SAML response's Recipient/Destination
+      # against exactly this value, so it must stay in sync with whatever
+      # URL is actually registered as the SP's ACS URL with the IdP.
+      EXTERNAL_URL: ${JACKSON_EXTERNAL_URL:-http://localhost:5225}
+      NEXTAUTH_URL: ${JACKSON_EXTERNAL_URL:-http://localhost:5225}
       WEBHOOK_URL: ${JACKSON_WEBHOOK_URL:-http://host.docker.internal:8000/identity/scim/webhook}
       WEBHOOK_SECRET: ${JACKSON_WEBHOOK_SECRET:?JACKSON_WEBHOOK_SECRET is required}
     extra_hosts:

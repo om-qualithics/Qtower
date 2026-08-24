@@ -40,6 +40,7 @@ class Policy(Base):
 
     version: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     storage_key: Mapped[str | None] = mapped_column(Text, nullable=True)
+    markdown_key: Mapped[str | None] = mapped_column(Text, nullable=True)
     generated_at: Mapped[datetime | None] = mapped_column(nullable=True)
 
     approved_at: Mapped[datetime | None] = mapped_column(nullable=True)

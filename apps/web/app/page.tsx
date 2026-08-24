@@ -6,6 +6,7 @@ import {
   fetchBrandingConfig,
   fetchCurrentUser,
   loginUrl,
+  superAdminLogin,
   type BrandingConfig,
   type CurrentUser,
 } from "@/lib/api";
@@ -16,6 +17,11 @@ export default function Home() {
   const [user, setUser] = useState<CurrentUser | null | "loading">("loading");
   const [branding, setBranding] = useState<BrandingConfig | null>(null);
   const [dark, setDark] = useState(false);
+  const [showAdminLogin, setShowAdminLogin] = useState(false);
+  const [adminEmail, setAdminEmail] = useState("");
+  const [adminPassword, setAdminPassword] = useState("");
+  const [adminError, setAdminError] = useState<string | null>(null);
+  const [adminSubmitting, setAdminSubmitting] = useState(false);
 
   useEffect(() => {
     fetchCurrentUser()
@@ -57,12 +63,61 @@ export default function Home() {
         )}
 
         {user === null && (
-          <a
-            href={loginUrl()}
-            className="mt-8 block w-full rounded-lg bg-primary px-4 py-2 text-center text-sm font-medium text-primary-foreground transition hover:opacity-90"
-          >
-            Sign in
-          </a>
+          <>
+            <a
+              href={loginUrl()}
+              className="mt-8 block w-full rounded-lg bg-primary px-4 py-2 text-center text-sm font-medium text-primary-foreground transition hover:opacity-90"
+            >
+              Sign in
+            </a>
+
+            {!showAdminLogin ? (
+              <button
+                type="button"
+                onClick={() => setShowAdminLogin(true)}
+                className="mt-3 w-full text-center text-xs text-muted-foreground underline-offset-2 hover:underline"
+              >
+                Sign in with admin credentials
+              </button>
+            ) : (
+              <div className="mt-3 space-y-2 rounded-lg border border-border p-3">
+                <input
+                  type="email"
+                  placeholder="Email"
+                  value={adminEmail}
+                  onChange={(e) => setAdminEmail(e.target.value)}
+                  className="h-8 w-full rounded-md border border-input bg-transparent px-2.5 text-sm outline-none focus-visible:border-ring"
+                />
+                <input
+                  type="password"
+                  placeholder="Password"
+                  value={adminPassword}
+                  onChange={(e) => setAdminPassword(e.target.value)}
+                  className="h-8 w-full rounded-md border border-input bg-transparent px-2.5 text-sm outline-none focus-visible:border-ring"
+                />
+                {adminError && <p className="text-xs text-destructive">{adminError}</p>}
+                <button
+                  type="button"
+                  disabled={adminSubmitting || !adminEmail.trim() || !adminPassword}
+                  onClick={async () => {
+                    setAdminSubmitting(true);
+                    setAdminError(null);
+                    try {
+                      await superAdminLogin(adminEmail.trim(), adminPassword);
+                      router.replace("/dashboard");
+                    } catch (err) {
+                      setAdminError(err instanceof Error ? err.message : "Sign-in failed.");
+                    } finally {
+                      setAdminSubmitting(false);
+                    }
+                  }}
+                  className="h-8 w-full rounded-md bg-primary text-sm font-medium text-primary-foreground transition hover:opacity-90 disabled:opacity-50"
+                >
+                  Sign in
+                </button>
+              </div>
+            )}
+          </>
         )}
 
         <button

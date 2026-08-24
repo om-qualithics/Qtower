@@ -27,9 +27,15 @@ def update_config(org: Org, fields: dict) -> DeploymentConfig:
             db.add(config)
             db.flush()
 
+        # `fields` is already `body.model_dump(exclude_unset=True)` from the
+        # router - only keys the client actually sent are present at all,
+        # so a `None` here means "explicitly clear this field," not "field
+        # omitted." Skipping None (as this used to do) made clearing any
+        # nullable field - e.g. org_display_name - permanently impossible:
+        # the client would send null, it'd be silently ignored, and the
+        # old value would just come back on the next GET.
         for key, value in fields.items():
-            if value is not None:
-                setattr(config, key, value)
+            setattr(config, key, value)
 
         db.flush()
         db.refresh(config)

@@ -13,6 +13,7 @@ if TYPE_CHECKING:
 _PERMISSIONS: dict[str, list[dict[str, set[str] | None]]] = {
     "identity.view_self": [{"system_role": None, "business_role": None}],
     "identity.manage_sso": [{"system_role": {"admin", "super_admin"}, "business_role": None}],
+    "identity.manage_users": [{"system_role": {"admin", "super_admin"}, "business_role": None}],
     "branding.manage": [{"system_role": {"admin", "super_admin"}, "business_role": None}],
     "tools.view": [{"system_role": None, "business_role": None}],
     "tools.request": [
@@ -41,6 +42,12 @@ _PERMISSIONS: dict[str, list[dict[str, set[str] | None]]] = {
         {"system_role": None, "business_role": {"govern", "assure"}},
         {"system_role": {"admin", "super_admin"}, "business_role": None},
     ],
+    "training.view": [{"system_role": None, "business_role": None}],
+    "training.manage": [
+        {"system_role": None, "business_role": {"govern", "assure"}},
+        {"system_role": {"admin", "super_admin"}, "business_role": None},
+    ],
+    "dashboard.view": [{"system_role": None, "business_role": None}],
 }
 
 

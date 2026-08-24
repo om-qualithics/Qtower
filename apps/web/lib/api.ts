@@ -30,12 +30,60 @@ export function loginUrl(): string {
   return `${API_BASE_URL}/identity/login`;
 }
 
+export async function superAdminLogin(email: string, password: string): Promise<void> {
+  const res = await fetch(`${API_BASE_URL}/identity/admin/login`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, password }),
+  });
+  if (res.status === 401) {
+    throw new Error("Invalid credentials");
+  }
+  await throwIfNotOk(res, "Sign-in failed");
+}
+
+export type OrgUser = {
+  id: string;
+  email: string;
+  business_role: string;
+  system_role: string;
+  role_source: "manual" | "synced";
+  active: boolean;
+};
+
+export async function fetchOrgUsers(): Promise<OrgUser[]> {
+  const res = await fetch(`${API_BASE_URL}/identity/admin/users`, { credentials: "include" });
+  await throwIfNotOk(res, "Failed to fetch users");
+  return res.json();
+}
+
+export async function updateUserRole(id: string, businessRole: string, systemRole: string): Promise<OrgUser> {
+  const res = await fetch(`${API_BASE_URL}/identity/admin/users/${id}`, {
+    method: "PATCH",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ business_role: businessRole, system_role: systemRole }),
+  });
+  if (res.status === 400) {
+    const body = await res.json();
+    throw new Error(body.detail ?? "Failed to update user role");
+  }
+  await throwIfNotOk(res, "Failed to update user role");
+  return res.json();
+}
+
+export type EmailTemplate = { subject: string; body: string };
+
 export type BrandingConfig = {
   org_display_name: string | null;
   logo_url: string | null;
   primary_color: string | null;
   secondary_color: string | null;
   enabled_feature_modules: string[] | null;
+  escalation_notify_override_email: string | null;
+  email_templates: Record<string, EmailTemplate> | null;
+  tool_assessment_prompt: string | null;
 };
 
 export async function fetchBrandingConfig(): Promise<BrandingConfig | null> {
@@ -44,6 +92,59 @@ export async function fetchBrandingConfig(): Promise<BrandingConfig | null> {
     return null;
   }
   return res.json();
+}
+
+export async function updateBrandingConfig(
+  fields: Partial<Omit<BrandingConfig, "enabled_feature_modules">>
+): Promise<BrandingConfig> {
+  const res = await fetch(`${API_BASE_URL}/branding/config`, {
+    method: "PATCH",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(fields),
+  });
+  await throwIfNotOk(res, "Failed to update branding config");
+  return res.json();
+}
+
+export type LicenseStatus = {
+  license_valid: boolean;
+  license_seat_count: number | null;
+  license_expires_at: string | null;
+  license_validated_at: string | null;
+  enabled_feature_modules: string[] | null;
+};
+
+export async function fetchLicenseStatus(): Promise<LicenseStatus> {
+  const res = await fetch(`${API_BASE_URL}/branding/license`, { credentials: "include" });
+  await throwIfNotOk(res, "Failed to fetch license status");
+  return res.json();
+}
+
+export type SsoConnectionStatus = {
+  configured: boolean;
+  connection_type: string | null;
+  created_at: string | null;
+};
+
+export async function fetchSsoConnectionStatus(): Promise<SsoConnectionStatus> {
+  const res = await fetch(`${API_BASE_URL}/identity/admin/sso-connection`, { credentials: "include" });
+  await throwIfNotOk(res, "Failed to fetch SSO connection status");
+  return res.json();
+}
+
+export async function createSsoConnection(fields: { metadataUrl?: string; metadataXml?: string }): Promise<void> {
+  const res = await fetch(`${API_BASE_URL}/identity/admin/sso-connection`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ metadata_url: fields.metadataUrl || null, metadata_xml: fields.metadataXml || null }),
+  });
+  if (res.status === 400) {
+    const body = await res.json();
+    throw new Error(body.detail ?? "Failed to save SSO connection");
+  }
+  await throwIfNotOk(res, "Failed to save SSO connection");
 }
 
 // --- AI Policy builder ---
@@ -207,7 +308,7 @@ export async function getPolicyDownloadUrl(id: string): Promise<string> {
 
 export type ToolRequestType = "tool" | "feature" | "webextension";
 export type ToolRequestStatus = "pending" | "approved" | "rejected";
-export type ToolAssessmentStatus = "pending" | "complete" | "failed";
+export type ToolAssessmentStatus = "pending" | "complete" | "failed" | "skipped";
 export type ToolAssessmentResult = "approvable" | "needs_review" | "cannot_approve";
 
 export type ApprovedTool = {
@@ -394,6 +495,108 @@ export async function fetchEscalations(options: { mine?: boolean } = {}): Promis
   return res.json();
 }
 
+// --- Training ---
+
+export type TrainingVideoType = "placeholder" | "file" | "embed";
+export type TrainingCompletionStatus = "not_started" | "in_progress" | "completed";
+
+export type TrainingQuestion = { id: string; prompt: string; options: string[] | null };
+
+export type TrainingModule = {
+  id: string;
+  order_index: number;
+  key: string;
+  title: string;
+  description: string;
+  body_text: string;
+  video_type: TrainingVideoType;
+  video_url: string | null;
+  questions: TrainingQuestion[];
+  completion_status: TrainingCompletionStatus;
+  answers: Record<string, string>;
+  is_locked: boolean;
+};
+
+export type TrainingModuleSummary = {
+  module_id: string;
+  title: string;
+  total_users: number;
+  completed_count: number;
+  completion_pct: number;
+};
+
+export type TrainingSummary = {
+  modules: TrainingModuleSummary[];
+  org_completion_pct: number;
+};
+
+export class TrainingLockedError extends Error {}
+
+async function throwTrainingErrors(res: Response, action: string): Promise<void> {
+  if (res.ok) return;
+  if (res.status === 403) {
+    const body = await res.json().catch(() => null);
+    throw new TrainingLockedError(body?.detail ?? "This module is locked - complete the previous one first.");
+  }
+  if (res.status === 400) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.detail ?? `${action} failed`);
+  }
+  await throwIfNotOk(res, action);
+}
+
+export async function fetchTrainingModules(): Promise<TrainingModule[]> {
+  const res = await fetch(`${API_BASE_URL}/training/modules`, { credentials: "include" });
+  await throwIfNotOk(res, "Failed to fetch training modules");
+  return res.json();
+}
+
+export async function fetchTrainingModule(id: string): Promise<TrainingModule> {
+  const res = await fetch(`${API_BASE_URL}/training/modules/${id}`, { credentials: "include" });
+  await throwTrainingErrors(res, "Failed to fetch training module");
+  return res.json();
+}
+
+export async function saveTrainingProgress(id: string, answers: Record<string, string>): Promise<TrainingModule> {
+  const res = await fetch(`${API_BASE_URL}/training/modules/${id}/progress`, {
+    method: "PATCH",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ answers }),
+  });
+  await throwTrainingErrors(res, "Failed to save progress");
+  return res.json();
+}
+
+export async function completeTrainingModule(id: string): Promise<TrainingModule> {
+  const res = await fetch(`${API_BASE_URL}/training/modules/${id}/complete`, {
+    method: "POST",
+    credentials: "include",
+  });
+  await throwTrainingErrors(res, "Failed to mark module complete");
+  return res.json();
+}
+
+export async function fetchTrainingSummary(): Promise<TrainingSummary> {
+  const res = await fetch(`${API_BASE_URL}/training/summary`, { credentials: "include" });
+  await throwIfNotOk(res, "Failed to fetch training summary");
+  return res.json();
+}
+
+export async function updateTrainingModule(
+  id: string,
+  fields: Partial<Pick<TrainingModule, "title" | "description" | "body_text" | "video_type" | "video_url">>
+): Promise<TrainingModule> {
+  const res = await fetch(`${API_BASE_URL}/training/modules/${id}`, {
+    method: "PATCH",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(fields),
+  });
+  await throwIfNotOk(res, "Failed to update training module");
+  return res.json();
+}
+
 export async function updateEscalation(
   id: string,
   updates: { status?: EscalationStatus; assigned_to?: string; resolution_note?: string }
@@ -409,5 +612,26 @@ export async function updateEscalation(
     throw new Error(body.detail ?? "Failed to update escalation");
   }
   await throwIfNotOk(res, "Failed to update escalation");
+  return res.json();
+}
+
+// --- Dashboard ---
+
+export type DashboardSummary = {
+  pending_policy_drafts: PolicyListItem[];
+  pending_tool_requests: ToolRequest[];
+  pending_alerts: Escalation[];
+  my_policy_drafts: PolicyListItem[];
+  my_tool_requests: ToolRequest[];
+  my_alerts: Escalation[];
+  my_training: TrainingModule[];
+  training_summary: TrainingSummary | null;
+  tool_request_counts: Record<string, number>;
+  escalation_counts: Record<string, number>;
+};
+
+export async function fetchDashboardSummary(): Promise<DashboardSummary> {
+  const res = await fetch(`${API_BASE_URL}/dashboard/summary`, { credentials: "include" });
+  await throwIfNotOk(res, "Failed to fetch dashboard summary");
   return res.json();
 }

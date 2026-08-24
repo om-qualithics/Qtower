@@ -6,10 +6,11 @@ psycopg[binary]==3.2.3
 pydantic==2.10.4
 pydantic-settings==2.7.0
 celery==5.4.0
-redis==5.2.1
+redis==5.2.1  # also used directly by core/rate_limit.py, not just as celery's broker
 boto3==1.35.90
 httpx==0.28.1
 pyjwt[crypto]==2.10.1
 litellm==1.56.4
 docxtpl==0.19.0
 python-multipart==0.0.20
+bcrypt==4.2.1

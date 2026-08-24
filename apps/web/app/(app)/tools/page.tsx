@@ -79,20 +79,42 @@ function statusBadge(status: string) {
   );
 }
 
-function AssessmentNote({ request }: { request: ToolRequest }) {
+function AssessmentNote({ request, size = "text-xs" }: { request: ToolRequest; size?: "text-xs" | "text-sm" }) {
   if (request.ai_assessment_status === "pending") {
-    return <p className="mt-1 text-xs text-muted-foreground">AI reviewing...</p>;
+    return <p className={`mt-1 ${size} text-muted-foreground`}>AI reviewing...</p>;
   }
   if (request.ai_assessment_status === "failed") {
-    return <p className="mt-1 text-xs text-muted-foreground">AI pre-check unavailable — manual review required.</p>;
+    return <p className={`mt-1 ${size} text-muted-foreground`}>AI pre-check unavailable — manual review required.</p>;
+  }
+  if (request.ai_assessment_status === "skipped") {
+    return <p className={`mt-1 ${size} text-muted-foreground`}>No AI precheck — no active AI Policy yet.</p>;
   }
   return (
-    <p className="mt-1 text-xs text-muted-foreground">
+    <p className={`mt-1 ${size} text-muted-foreground`}>
       <span className="font-medium text-foreground">AI pre-check (not a decision):</span>{" "}
       {ASSESSMENT_LABELS[request.ai_assessment_result ?? ""] ?? request.ai_assessment_result} —{" "}
       {request.ai_assessment_explanation}
     </p>
   );
+}
+
+function classificationBadge(request: ToolRequest): { label: string; className: string } {
+  if (request.ai_assessment_status === "pending") {
+    return { label: "AI reviewing...", className: "bg-secondary text-secondary-foreground" };
+  }
+  if (request.ai_assessment_status === "failed") {
+    return { label: "Precheck unavailable", className: "bg-muted text-muted-foreground" };
+  }
+  if (request.ai_assessment_status === "skipped") {
+    return { label: "No precheck", className: "bg-muted text-muted-foreground" };
+  }
+  const styles: Record<string, string> = {
+    approvable: "bg-primary/10 text-primary",
+    needs_review: "bg-accent/15 text-accent",
+    cannot_approve: "bg-destructive/10 text-destructive",
+  };
+  const result = request.ai_assessment_result ?? "";
+  return { label: ASSESSMENT_LABELS[result] ?? result, className: styles[result] ?? "bg-muted text-muted-foreground" };
 }
 
 export default function ToolsPage() {
@@ -105,8 +127,25 @@ export default function ToolsPage() {
 
   const [selectedTool, setSelectedTool] = useState<ApprovedTool | null>(null);
   const [requestOpen, setRequestOpen] = useState(false);
+  const [detailTarget, setDetailTarget] = useState<ToolRequest | null>(null);
+  const [viewTarget, setViewTarget] = useState<ToolRequest | null>(null);
   const [approveTarget, setApproveTarget] = useState<ToolRequest | null>(null);
   const [editTool, setEditTool] = useState<ApprovedTool | null>(null);
+
+  const handleReject = async (request: ToolRequest) => {
+    const reason = window.prompt("Optional reason for rejecting this request:") ?? undefined;
+    setBusy(true);
+    setError(null);
+    try {
+      await rejectToolRequest(request.id, reason || undefined);
+      setDetailTarget(null);
+      refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Something went wrong.");
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const refresh = () => {
     fetchApprovedTools()
@@ -242,18 +281,22 @@ export default function ToolsPage() {
       {canRequest(user) && myRequests.length > 0 && (
         <section className="mb-8">
           <h2 className="mb-3 text-sm font-semibold text-muted-foreground">My Requests</h2>
-          <div className="space-y-3">
+          <div className="space-y-2">
             {myRequests.map((request) => (
-              <div key={request.id} className="rounded-2xl border border-border bg-card p-4">
-                <div className="flex items-center gap-2">
-                  <span className="text-sm font-medium">{request.name}</span>
-                  <span className="rounded-md bg-muted px-2 py-0.5 text-xs text-muted-foreground">
+              <button
+                key={request.id}
+                type="button"
+                onClick={() => setViewTarget(request)}
+                className="flex w-full items-center justify-between gap-3 rounded-2xl border border-border bg-card p-4 text-left hover:bg-muted"
+              >
+                <div className="flex min-w-0 items-center gap-2">
+                  <span className="truncate text-sm font-medium">{request.name}</span>
+                  <span className="shrink-0 rounded-md bg-muted px-2 py-0.5 text-xs text-muted-foreground">
                     {REQUEST_TYPE_LABELS[request.request_type]}
                   </span>
-                  {statusBadge(request.status)}
                 </div>
-                <AssessmentNote request={request} />
-              </div>
+                {statusBadge(request.status)}
+              </button>
             ))}
           </div>
         </section>
@@ -265,58 +308,26 @@ export default function ToolsPage() {
           {pendingRequests.length === 0 ? (
             <p className="text-sm text-muted-foreground">Nothing pending approval.</p>
           ) : (
-            <div className="space-y-3">
+            <div className="space-y-2">
               {pendingRequests.map((request) => {
-                const isOwn = user?.id === request.requested_by;
+                const badge = classificationBadge(request);
                 return (
-                  <div key={request.id} className="rounded-2xl border border-border bg-card p-4">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <span className="text-sm font-medium">{request.name}</span>
-                          <span className="rounded-md bg-muted px-2 py-0.5 text-xs text-muted-foreground">
-                            {REQUEST_TYPE_LABELS[request.request_type]}
-                          </span>
-                        </div>
-                        <p className="mt-1 text-xs text-muted-foreground">
-                          Requested by {request.requested_by_email ?? "unknown"} · {request.link}
-                        </p>
-                        <p className="mt-1 text-xs text-muted-foreground">{request.intended_use_case}</p>
-                        <AssessmentNote request={request} />
-                      </div>
-                      <div className="flex shrink-0 gap-2">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          disabled={busy || isOwn}
-                          title={isOwn ? "You cannot reject your own request" : undefined}
-                          onClick={async () => {
-                            const reason = window.prompt("Optional reason for rejecting this request:") ?? undefined;
-                            setBusy(true);
-                            setError(null);
-                            try {
-                              await rejectToolRequest(request.id, reason || undefined);
-                              refresh();
-                            } catch (err) {
-                              setError(err instanceof Error ? err.message : "Something went wrong.");
-                            } finally {
-                              setBusy(false);
-                            }
-                          }}
-                        >
-                          Reject
-                        </Button>
-                        <Button
-                          size="sm"
-                          disabled={busy || isOwn}
-                          title={isOwn ? "You cannot approve your own request" : undefined}
-                          onClick={() => setApproveTarget(request)}
-                        >
-                          Approve
-                        </Button>
-                      </div>
+                  <button
+                    key={request.id}
+                    type="button"
+                    onClick={() => setDetailTarget(request)}
+                    className="flex w-full items-center justify-between gap-3 rounded-2xl border border-border bg-card p-4 text-left hover:bg-muted"
+                  >
+                    <div className="flex min-w-0 items-center gap-2">
+                      <span className="truncate text-sm font-medium">{request.name}</span>
+                      <span className="shrink-0 rounded-md bg-muted px-2 py-0.5 text-xs text-muted-foreground">
+                        {REQUEST_TYPE_LABELS[request.request_type]}
+                      </span>
                     </div>
-                  </div>
+                    <span className={`shrink-0 rounded-md px-2 py-0.5 text-xs font-medium ${badge.className}`}>
+                      {badge.label}
+                    </span>
+                  </button>
                 );
               })}
             </div>
@@ -331,6 +342,27 @@ export default function ToolsPage() {
         setError={setError}
       />
       <ToolDetailDialog tool={selectedTool} onOpenChange={(open) => !open && setSelectedTool(null)} />
+      <RequestDetailDialog
+        mode="approve"
+        request={detailTarget}
+        currentUser={user}
+        busy={busy}
+        onOpenChange={(open) => !open && setDetailTarget(null)}
+        onApproveClick={(request) => {
+          setDetailTarget(null);
+          setApproveTarget(request);
+        }}
+        onReject={handleReject}
+      />
+      <RequestDetailDialog
+        mode="view"
+        request={viewTarget}
+        currentUser={user}
+        busy={busy}
+        onOpenChange={(open) => !open && setViewTarget(null)}
+        onApproveClick={() => {}}
+        onReject={() => {}}
+      />
       <ApproveDialog
         request={approveTarget}
         onOpenChange={(open) => !open && setApproveTarget(null)}
@@ -494,6 +526,78 @@ function ToolDetailDialog({ tool, onOpenChange }: { tool: ApprovedTool | null; o
               />
             )}
           </DialogFooter>
+        </DialogContent>
+      )}
+    </Dialog>
+  );
+}
+
+function RequestDetailDialog({
+  mode,
+  request,
+  currentUser,
+  busy,
+  onOpenChange,
+  onApproveClick,
+  onReject,
+}: {
+  mode: "approve" | "view";
+  request: ToolRequest | null;
+  currentUser: CurrentUser | null;
+  busy: boolean;
+  onOpenChange: (open: boolean) => void;
+  onApproveClick: (request: ToolRequest) => void;
+  onReject: (request: ToolRequest) => void;
+}) {
+  const isOwn = !!request && currentUser?.id === request.requested_by;
+
+  return (
+    <Dialog open={request !== null} onOpenChange={onOpenChange}>
+      {request && (
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              {request.name}
+              <span className="rounded-md bg-muted px-2 py-0.5 text-xs font-normal text-muted-foreground">
+                {REQUEST_TYPE_LABELS[request.request_type]}
+              </span>
+              {mode === "view" && statusBadge(request.status)}
+            </DialogTitle>
+            <DialogDescription>
+              Requested by {request.requested_by_email ?? "unknown"} ·{" "}
+              <a href={request.link} target="_blank" rel="noopener noreferrer" className="underline">
+                {request.link}
+              </a>
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 text-sm">
+            <div>
+              <p className="mb-1 text-xs font-medium text-muted-foreground">Intended use case</p>
+              <p>{request.intended_use_case}</p>
+            </div>
+            <AssessmentNote request={request} size="text-sm" />
+          </div>
+
+          {mode === "approve" && (
+            <DialogFooter>
+              <Button
+                variant="outline"
+                disabled={busy || isOwn}
+                title={isOwn ? "You cannot reject your own request" : undefined}
+                onClick={() => onReject(request)}
+              >
+                Reject
+              </Button>
+              <Button
+                disabled={busy || isOwn}
+                title={isOwn ? "You cannot approve your own request" : undefined}
+                onClick={() => onApproveClick(request)}
+              >
+                Approve
+              </Button>
+            </DialogFooter>
+          )}
         </DialogContent>
       )}
     </Dialog>

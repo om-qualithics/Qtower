@@ -1,8 +1,11 @@
-from fastapi import APIRouter, Cookie, File, HTTPException, UploadFile
+from fastapi import APIRouter, Cookie, Depends, File, HTTPException, UploadFile
 
+from apps.api.core.uploads import UploadTooLargeError, read_limited
 from apps.api.modules.authz import service as authz_service
 from apps.api.modules.identity import service as identity_service
+from apps.api.modules.licensing.service import require_valid_license
 from apps.api.modules.policy import service as policy_service
+from apps.api.modules.policy.constants import MAX_UPLOAD_SIZE_BYTES
 from apps.api.modules.policy.questions import STEPS
 from apps.api.modules.policy.schemas import (
     ColumnOut,
@@ -16,7 +19,7 @@ from apps.api.modules.policy.schemas import (
 )
 from apps.api.modules.policy.service import PolicyApprovalError, PolicyUploadError, PolicyValidationError
 
-router = APIRouter(prefix="/policy", tags=["policy"])
+router = APIRouter(prefix="/policy", tags=["policy"], dependencies=[Depends(require_valid_license)])
 
 
 def _require_user(session_token: str | None):
@@ -115,7 +118,10 @@ async def upload_policy(file: UploadFile = File(...), misty_session: str | None 
     if not authz_service.can(user, "policy.manage"):
         raise HTTPException(status_code=403, detail="Forbidden")
     org = identity_service.get_org()
-    file_bytes = await file.read()
+    try:
+        file_bytes = await read_limited(file, MAX_UPLOAD_SIZE_BYTES)
+    except UploadTooLargeError as exc:
+        raise HTTPException(status_code=413, detail=str(exc)) from exc
     try:
         policy = policy_service.upload_policy(org, user, file.filename or "policy.docx", file_bytes)
     except PolicyUploadError as exc:

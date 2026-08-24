@@ -30,7 +30,12 @@ def _delete_org(org: Org) -> None:
         db.close()
 
 
-def test_mock_provider_round_trip() -> None:
+def test_mock_provider_round_trip(monkeypatch) -> None:
+    # Explicitly pinned rather than relying on Settings' "mock" default -
+    # a real deployment's infra/.env sets AI_PROVIDER=live (Milestone 10),
+    # and this test must stay hermetic (no real API call) regardless of
+    # local env config.
+    monkeypatch.setattr("apps.api.modules.ai_gateway.service.settings.ai_provider", "mock")
     org = _make_org("AI Gateway Test Org")
     try:
         response = complete("test_feature", org, "hello")

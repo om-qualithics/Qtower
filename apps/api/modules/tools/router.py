@@ -1,7 +1,9 @@
-from fastapi import APIRouter, Cookie, HTTPException, Query
+from fastapi import APIRouter, Cookie, Depends, HTTPException, Query
 
+from apps.api.core.rate_limit import RateLimitExceededError, check_rate_limit
 from apps.api.modules.authz import service as authz_service
 from apps.api.modules.identity import service as identity_service
+from apps.api.modules.licensing.service import require_valid_license
 from apps.api.modules.tools import service as tools_service
 from apps.api.modules.tools.schemas import (
     ApprovedToolOut,
@@ -18,7 +20,7 @@ from apps.api.modules.tools.service import (
 )
 from apps.api.modules.tools.tasks import assess_tool_request
 
-router = APIRouter(prefix="/tools", tags=["tools"])
+router = APIRouter(prefix="/tools", tags=["tools"], dependencies=[Depends(require_valid_license)])
 
 
 def _require_user(session_token: str | None):
@@ -111,6 +113,13 @@ def create_tool_request(body: ToolRequestCreate, misty_session: str | None = Coo
     user = _require_user(misty_session)
     if not authz_service.can(user, "tools.request"):
         raise HTTPException(status_code=403, detail="Forbidden")
+    try:
+        # Every request that isn't skipped fires a real (billed, once
+        # AI_PROVIDER=live) LLM call via the Celery task below - this
+        # bounds per-user spend/abuse, not general API traffic.
+        check_rate_limit(f"tool-request:{user.id}", limit=20, window_seconds=3600)
+    except RateLimitExceededError as exc:
+        raise HTTPException(status_code=429, detail=str(exc)) from exc
     org = identity_service.get_org()
     try:
         request = tools_service.create_request(org, user, body.request_type, body.name, body.link, body.intended_use_case)
@@ -119,7 +128,12 @@ def create_tool_request(body: ToolRequestCreate, misty_session: str | None = Coo
     except ToolRequestValidationError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    assess_tool_request.delay(str(request.id), str(org.id))
+    if request.ai_assessment_status == "pending":
+        # create_request() already sets ai_assessment_status="skipped"
+        # directly (no active policy to assess against) instead of
+        # leaving it "pending" - only enqueue the task when there's
+        # actually something for it to do.
+        assess_tool_request.delay(str(request.id), str(org.id))
     return _to_tool_request_out(org, request)
 
 

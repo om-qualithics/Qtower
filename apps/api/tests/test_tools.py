@@ -1,9 +1,14 @@
+import io
+
+import docx
 import pytest
 
+from apps.api.core import storage
 from apps.api.core.db import SessionLocal, org_scoped_session
 from apps.api.modules.ai_gateway.models import LlmUsageLog
 from apps.api.modules.ai_gateway.schemas import GatewayResponse
 from apps.api.modules.identity.models import Org, User
+from apps.api.modules.policy.models import Policy
 from apps.api.modules.tools import service, tasks
 from apps.api.modules.tools.models import ApprovedTool, ToolRequest
 from apps.api.modules.tools.service import ToolApprovalError, ToolRequestDuplicateError
@@ -31,6 +36,37 @@ def _make_user(org: Org, email: str, business_role: str = "assure") -> User:
         return user
 
 
+def _make_active_policy(org: Org) -> None:
+    """Real minimal docx uploaded and approved, so
+    policy_service.get_active_policy_text()/has_active_policy() see a
+    live policy - needed for any test exercising the AI precheck path,
+    which Milestone 10 gates on a policy actually being active."""
+    with org_scoped_session(str(org.id)) as db:
+        policy = Policy(org_id=org.id, answers={}, status="draft", storage_key="")
+        db.add(policy)
+        db.flush()
+        db.refresh(policy)
+        policy_id = str(policy.id)
+        storage_key = f"policies/{org.id}/{policy_id}/document.docx"
+        policy.storage_key = storage_key
+        db.flush()
+
+    doc = docx.Document()
+    doc.add_paragraph("Employees may use approved AI tools for coding assistance. Do not paste customer PII into any AI tool.")
+    buf = io.BytesIO()
+    doc.save(buf)
+    storage.upload_bytes(storage_key, buf.getvalue(), "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+
+    from apps.api.modules.policy import service as policy_service
+
+    with org_scoped_session(str(org.id)) as db:
+        existing = db.query(User).filter(User.org_id == org.id).first()
+        if existing is not None:
+            db.expunge(existing)
+    approver = existing if existing is not None else _make_user(org, "policy-approver@example.com", "govern")
+    policy_service.approve(org, policy_id, approver)
+
+
 def _delete_org(org: Org) -> None:
     with org_scoped_session(str(org.id)) as db:
         # tool_request.resulting_tool_id <-> approved_tool.created_from_request_id
@@ -45,6 +81,7 @@ def _delete_org(org: Org) -> None:
         db.query(ToolRequest).filter(ToolRequest.org_id == org.id).delete(synchronize_session=False)
         db.query(ApprovedTool).filter(ApprovedTool.org_id == org.id).delete(synchronize_session=False)
         db.query(LlmUsageLog).filter(LlmUsageLog.org_id == org.id).delete(synchronize_session=False)
+        db.query(Policy).filter(Policy.org_id == org.id).delete(synchronize_session=False)
         db.query(User).filter(User.org_id == org.id).delete(synchronize_session=False)
     db = SessionLocal()
     try:
@@ -52,6 +89,53 @@ def _delete_org(org: Org) -> None:
         db.commit()
     finally:
         db.close()
+
+
+def test_parse_assessment_handles_clean_json() -> None:
+    classification, rationale = tasks._parse_assessment('{"classification": "Approvable", "rational": "Fine."}')
+    assert classification == "approvable"
+    assert rationale == "Fine."
+
+
+def test_parse_assessment_handles_json_wrapped_in_prose() -> None:
+    raw = 'Sure, here is my answer:\n{"classification": "Need Review", "rational": "Ambiguous."}\nHope that helps!'
+    classification, rationale = tasks._parse_assessment(raw)
+    assert classification == "needs_review"
+    assert rationale == "Ambiguous."
+
+
+def test_parse_assessment_normalizes_every_classification_label() -> None:
+    assert tasks._parse_assessment('{"classification": "Unapprovable", "explanation": "No."}')[0] == "cannot_approve"
+    assert tasks._parse_assessment('{"classification": "cannot approve", "rationale": "No."}')[0] == "cannot_approve"
+    assert tasks._parse_assessment('{"classification": "needs review", "explanation": "Hmm."}')[0] == "needs_review"
+
+
+def test_parse_assessment_raises_on_missing_rationale() -> None:
+    with pytest.raises(ValueError):
+        tasks._parse_assessment('{"classification": "Approvable"}')
+
+
+def test_parse_assessment_raises_on_unrecognized_classification() -> None:
+    with pytest.raises(ValueError):
+        tasks._parse_assessment('{"classification": "Maybe", "rational": "Unclear."}')
+
+
+def test_parse_assessment_raises_on_garbage() -> None:
+    with pytest.raises(ValueError):
+        tasks._parse_assessment("not json at all")
+
+
+def test_create_request_skips_assessment_without_active_policy() -> None:
+    org = _make_org("Tools No Policy Org")
+    try:
+        requester = _make_user(org, "requester-nopolicy@example.com")
+        request = service.create_request(org, requester, "tool", "Unassessed Tool", "https://example.com/np", "use case")
+
+        assert request.ai_assessment_status == "skipped"
+        assert request.ai_assessment_result is None
+        assert request.ai_assessment_explanation == service.NO_ACTIVE_POLICY_EXPLANATION
+    finally:
+        _delete_org(org)
 
 
 def test_create_request_rejects_normalized_duplicate_name() -> None:
@@ -155,13 +239,15 @@ def test_update_and_delete_approved_tool_direct_curation() -> None:
         _delete_org(org)
 
 
-def test_assess_tool_request_fails_safe_on_non_json_mock_response() -> None:
+def test_assess_tool_request_fails_safe_on_non_json_mock_response(monkeypatch) -> None:
     """The mock provider's canned text isn't JSON, so the task must land on
     ai_assessment_status="failed" and MUST NOT set ai_assessment_result -
     proving a broken/unparseable assessment can never look like an
     approval."""
+    monkeypatch.setattr("apps.api.modules.ai_gateway.service.settings.ai_provider", "mock")
     org = _make_org("Tools Assess Fail Org")
     try:
+        _make_active_policy(org)
         requester = _make_user(org, "requester5@example.com")
         request = service.create_request(org, requester, "tool", "Assessed Tool", "https://example.com/a", "use case")
 
@@ -177,6 +263,7 @@ def test_assess_tool_request_fails_safe_on_non_json_mock_response() -> None:
 def test_assess_tool_request_parses_valid_json_response(monkeypatch) -> None:
     org = _make_org("Tools Assess Happy Org")
     try:
+        _make_active_policy(org)
         requester = _make_user(org, "requester6@example.com")
         request = service.create_request(org, requester, "tool", "Assessed Tool 2", "https://example.com/b", "use case")
 

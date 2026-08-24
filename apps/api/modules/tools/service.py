@@ -5,8 +5,11 @@ from sqlalchemy import select
 
 from apps.api.core.db import org_scoped_session
 from apps.api.modules.identity.models import Org, User
+from apps.api.modules.policy import service as policy_service
 from apps.api.modules.tools.constants import TIER_KEYS
 from apps.api.modules.tools.models import ApprovedTool, ToolRequest
+
+NO_ACTIVE_POLICY_EXPLANATION = "No active AI Policy yet - precheck skipped."
 
 REQUEST_TYPES = ("tool", "feature", "webextension")
 
@@ -48,6 +51,13 @@ def create_request(org: Org, user: User, request_type: str, name: str, link: str
         raise ToolRequestValidationError("Link is required")
 
     normalized = _normalize_name(name)
+    # Checked before opening the insert's own session/transaction below -
+    # has_active_policy() runs its own org_scoped_session, and a broken
+    # request/response race here is harmless either way (fail-open: worst
+    # case a request lands "skipped" moments before a policy goes active,
+    # fixable by re-submitting).
+    policy_is_live = policy_service.has_active_policy(org)
+
     with org_scoped_session(str(org.id)) as db:
         existing_tools = db.scalars(select(ApprovedTool).where(ApprovedTool.org_id == org.id)).all()
         for tool in existing_tools:
@@ -63,6 +73,13 @@ def create_request(org: Org, user: User, request_type: str, name: str, link: str
             intended_use_case=use_case.strip(),
             requested_by=user.id,
         )
+        if not policy_is_live:
+            # No policy to assess against - skip the AI precheck entirely
+            # rather than enqueue a task that would have nothing to
+            # compare the request to. The router checks this same status
+            # to decide whether to fire the Celery task at all.
+            request.ai_assessment_status = "skipped"
+            request.ai_assessment_explanation = NO_ACTIVE_POLICY_EXPLANATION
         db.add(request)
         db.flush()
         db.refresh(request)

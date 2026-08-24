@@ -1,4 +1,5 @@
 import json
+import re
 import uuid
 
 from apps.api.core.celery_app import celery_app
@@ -7,9 +8,47 @@ from apps.api.modules.ai_gateway import service as ai_gateway_service
 from apps.api.modules.identity.models import Org
 from apps.api.modules.policy import service as policy_service
 from apps.api.modules.tools.models import ToolRequest
-from apps.api.modules.tools.prompts import TOOL_ASSESSMENT_SYSTEM_PROMPT, build_assessment_prompt
+from apps.api.modules.tools.prompts import render_assessment_prompt
 
-VALID_CLASSIFICATIONS = {"approvable", "needs_review", "cannot_approve"}
+# Maps every label variant the (admin-editable) prompt might come back
+# with onto this app's internal enum values - case-insensitive, since an
+# admin-edited prompt or ordinary model drift shouldn't be able to break
+# parsing. The prompt's own instructed labels are "Approvable"/"Need
+# Review"/"Unapprovable"; a few synonyms are accepted defensively.
+_CLASSIFICATION_MAP = {
+    "approvable": "approvable",
+    "need review": "needs_review",
+    "needs review": "needs_review",
+    "needs_review": "needs_review",
+    "unapprovable": "cannot_approve",
+    "cannot approve": "cannot_approve",
+    "cannot_approve": "cannot_approve",
+    "not approvable": "cannot_approve",
+}
+_CLASSIFICATION_KEYS = ("classification", "request_classification")
+_RATIONALE_KEYS = ("rational", "rationale", "explanation", "classification_rational")
+_JSON_OBJECT_RE = re.compile(r"\{.*\}", re.DOTALL)
+
+
+def _parse_assessment(raw: str) -> tuple[str, str]:
+    """Never raises a classification the caller could mistake for success
+    without both a valid classification and a non-empty rationale - any
+    other shape raises, and the caller's except-block turns that into
+    ai_assessment_status="failed" (never an assumed approval)."""
+    try:
+        parsed = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        match = _JSON_OBJECT_RE.search(raw)
+        if not match:
+            raise ValueError(f"No JSON object found in assessment response: {raw!r}") from None
+        parsed = json.loads(match.group(0))
+
+    classification_raw = next((parsed[k] for k in _CLASSIFICATION_KEYS if parsed.get(k)), "")
+    classification = _CLASSIFICATION_MAP.get(str(classification_raw).strip().lower())
+    rationale = next((parsed[k] for k in _RATIONALE_KEYS if parsed.get(k)), None)
+    if not classification or not rationale:
+        raise ValueError(f"Unexpected assessment response shape: {parsed!r}")
+    return classification, rationale
 
 
 def _load_org(org_id: str) -> Org | None:
@@ -47,13 +86,16 @@ def assess_tool_request(request_id: str, org_id: str) -> None:
 
     try:
         policy_text = policy_service.get_active_policy_text(org)
-        prompt = build_assessment_prompt(policy_text, request_type, name, link, use_case)
-        result = ai_gateway_service.complete("tool_assessment", org, prompt, system=TOOL_ASSESSMENT_SYSTEM_PROMPT)
-        parsed = json.loads(result.content)
-        classification = parsed.get("classification")
-        explanation = parsed.get("explanation")
-        if classification not in VALID_CLASSIFICATIONS or not explanation:
-            raise ValueError(f"Unexpected assessment response shape: {parsed!r}")
+        if not policy_text:
+            # Should not normally happen - the router only enqueues this
+            # task when create_request() already confirmed an active
+            # policy exists - but the policy could in principle have been
+            # archived in the gap between request creation and this task
+            # running. Fail closed, same as any other assessment failure.
+            raise ValueError("No active AI Policy text available for assessment")
+        prompt = render_assessment_prompt(org, request_type, name, link, use_case, policy_text)
+        result = ai_gateway_service.complete("tool_assessment", org, prompt)
+        classification, explanation = _parse_assessment(result.content)
 
         with org_scoped_session(str(org.id)) as db:
             target = db.get(ToolRequest, uuid.UUID(request_id))

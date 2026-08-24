@@ -10,7 +10,9 @@ from apps.api.core.db import Base
 
 ToolRequestType = PgEnum("tool", "feature", "webextension", name="tool_request_type", create_type=False)
 ToolRequestStatus = PgEnum("pending", "approved", "rejected", name="tool_request_status", create_type=False)
-ToolAssessmentStatus = PgEnum("pending", "complete", "failed", name="tool_assessment_status", create_type=False)
+ToolAssessmentStatus = PgEnum(
+    "pending", "complete", "failed", "skipped", name="tool_assessment_status", create_type=False
+)
 ToolAssessmentResult = PgEnum(
     "approvable", "needs_review", "cannot_approve", name="tool_assessment_result", create_type=False
 )

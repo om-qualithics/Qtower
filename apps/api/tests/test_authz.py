@@ -19,6 +19,12 @@ def test_view_self_allowed_for_any_authenticated_user() -> None:
     assert can(_user("govern", "super_admin"), "identity.view_self")
 
 
+def test_manage_users_requires_admin_system_role() -> None:
+    assert not can(_user("govern", "user"), "identity.manage_users")
+    assert can(_user("operator", "admin"), "identity.manage_users")
+    assert can(_user("operator", "super_admin"), "identity.manage_users")
+
+
 def test_manage_sso_requires_admin_system_role() -> None:
     assert not can(_user("operator", "user"), "identity.manage_sso")
     assert can(_user("operator", "admin"), "identity.manage_sso")
@@ -81,3 +87,20 @@ def test_escalations_manage_requires_govern_assure_or_system_admin() -> None:
     assert can(_user("govern", "user"), "escalations.manage")
     assert can(_user("assure", "user"), "escalations.manage")
     assert can(_user("operator", "admin"), "escalations.manage")
+
+
+def test_training_view_allowed_for_any_authenticated_user() -> None:
+    assert can(_user("operator", "user"), "training.view")
+    assert can(_user("govern", "super_admin"), "training.view")
+
+
+def test_training_manage_requires_govern_assure_or_system_admin() -> None:
+    assert not can(_user("operator", "user"), "training.manage")
+    assert can(_user("govern", "user"), "training.manage")
+    assert can(_user("assure", "user"), "training.manage")
+    assert can(_user("operator", "admin"), "training.manage")
+
+
+def test_dashboard_view_allowed_for_any_authenticated_user() -> None:
+    assert can(_user("operator", "user"), "dashboard.view")
+    assert can(_user("govern", "super_admin"), "dashboard.view")

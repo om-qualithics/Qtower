@@ -20,6 +20,7 @@ import {
   API_BASE_URL,
   fetchBrandingConfig,
   fetchCurrentUser,
+  fetchTrainingModules,
   type BrandingConfig,
   type CurrentUser,
 } from "@/lib/api";
@@ -30,9 +31,17 @@ const NAV_ITEMS = [
   { label: "AI Policy", href: "/policy", icon: ScrollText, enabled: true },
   { label: "AI Tools", href: "/tools", icon: Grid3x3, enabled: true },
   { label: "Raise Alert", href: "/escalations", icon: AlertTriangle, enabled: true },
-  { label: "Training", href: null, icon: GraduationCap, enabled: false },
-  { label: "Settings", href: null, icon: Settings, enabled: false },
+  { label: "Training", href: "/training", icon: GraduationCap, enabled: true },
+  { label: "Settings", href: "/settings", icon: Settings, enabled: true },
 ];
+
+// Settings currently only has branding/SSO sections (system admin only,
+// see settings/page.tsx) - hidden entirely for anyone else, same "hide
+// what has nothing to show" spirit as the dashboard's role-gated
+// sections.
+function canSeeSettings(user: CurrentUser | null): boolean {
+  return !!user && ["admin", "super_admin"].includes(user.system_role);
+}
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
@@ -40,18 +49,43 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<CurrentUser | null | "loading">("loading");
   const [branding, setBranding] = useState<BrandingConfig | null>(null);
   const [dark, setDark] = useState(false);
+  const [trainingIncomplete, setTrainingIncomplete] = useState(false);
 
   useEffect(() => {
-    fetchCurrentUser()
-      .then((u) => {
-        if (u === null) {
-          router.replace("/");
-        }
-        setUser(u);
-      })
-      .catch(() => router.replace("/"));
+    const checkAuth = () =>
+      fetchCurrentUser()
+        .then((u) => {
+          if (u === null) {
+            router.replace("/");
+          }
+          setUser(u);
+        })
+        .catch(() => router.replace("/"));
+
+    checkAuth();
     fetchBrandingConfig().then(setBranding);
+    // Soft reminder for mandatory training (not a hard gate, see plan) - a
+    // small nav dot whenever any module isn't completed yet.
+    fetchTrainingModules()
+      .then((modules) => setTrainingIncomplete(modules.some((m) => m.completion_status !== "completed")))
+      .catch(() => setTrainingIncomplete(false));
     queueMicrotask(() => setDark(getStoredDark()));
+
+    // Security fix: a browser Back navigation after Sign Out can restore
+    // this page straight from bfcache - the whole React tree (including
+    // this component's `user` state) comes back exactly as it was, with
+    // no remount and no network request, so the mount effect above never
+    // reruns and the stale "signed in" UI just sits there even though the
+    // session cookie is gone server-side. `pageshow` with `persisted:
+    // true` is the one event that reliably fires on a bfcache restore
+    // (a plain re-mount effect does not) - re-checking auth there forces
+    // a real fetchCurrentUser() call, which now 401s and redirects to "/"
+    // instead of silently showing the previous user's data.
+    const onPageShow = (event: PageTransitionEvent) => {
+      if (event.persisted) checkAuth();
+    };
+    window.addEventListener("pageshow", onPageShow);
+    return () => window.removeEventListener("pageshow", onPageShow);
   }, [router]);
 
   const displayName = branding?.org_display_name || "Q Tower";
@@ -81,7 +115,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </div>
 
         <nav className="flex flex-1 flex-col gap-1">
-          {NAV_ITEMS.map((item) => {
+          {NAV_ITEMS.filter((item) => item.label !== "Settings" || canSeeSettings(user)).map((item) => {
             const Icon = item.icon;
             const active = item.href !== null && pathname === item.href;
             if (!item.enabled || item.href === null) {
@@ -111,6 +145,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               >
                 <Icon className="size-4" />
                 {item.label}
+                {item.label === "Training" && trainingIncomplete && (
+                  <span
+                    title="Mandatory training incomplete"
+                    className="ml-auto size-1.5 shrink-0 rounded-full bg-destructive"
+                  />
+                )}
               </Link>
             );
           })}

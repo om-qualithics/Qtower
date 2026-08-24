@@ -43,6 +43,16 @@ class Settings(BaseSettings):
     jackson_api_keys: str = ""
     jackson_webhook_secret: str = ""
 
+    # Break-glass local login, independent of Jackson/SAML entirely - lets
+    # a deployment operator always get in (to fix a broken SSO connection,
+    # or to bootstrap the very first real admin under an IdP that can't
+    # push role data, e.g. Google Workspace) regardless of IdP state. Unset
+    # by default = this login path is disabled outright, not a silent
+    # blank-password backdoor. Set via apps/api/scripts/set_super_admin_password.py,
+    # never plaintext.
+    super_admin_email: str = ""
+    super_admin_password_hash: str = ""
+
     license_public_key: str = ""
     license_token: str = ""
 

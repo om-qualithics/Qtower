@@ -1,14 +1,18 @@
-from fastapi import APIRouter, Cookie, File, Form, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Cookie, Depends, File, Form, HTTPException, Query, UploadFile
 
 from apps.api.core import storage
+from apps.api.core.uploads import UploadTooLargeError, read_limited
 from apps.api.modules.authz import service as authz_service
 from apps.api.modules.escalations import service as escalations_service
 from apps.api.modules.escalations.schemas import EscalationDownloadOut, EscalationOut, EscalationUpdate
 from apps.api.modules.escalations.service import EscalationValidationError
 from apps.api.modules.identity import service as identity_service
+from apps.api.modules.licensing.service import require_valid_license
 from apps.api.modules.notifications.tasks import send_email_task
+from apps.api.modules.notifications.templates import render_template
+from apps.api.modules.policy.constants import MAX_UPLOAD_SIZE_BYTES
 
-router = APIRouter(prefix="/escalations", tags=["escalations"])
+router = APIRouter(prefix="/escalations", tags=["escalations"], dependencies=[Depends(require_valid_license)])
 
 
 def _require_user(session_token: str | None):
@@ -50,7 +54,10 @@ async def create_escalation(
         raise HTTPException(status_code=403, detail="Forbidden")
     org = identity_service.get_org()
 
-    attachment_bytes = await file.read() if file is not None else None
+    try:
+        attachment_bytes = await read_limited(file, MAX_UPLOAD_SIZE_BYTES) if file is not None else None
+    except UploadTooLargeError as exc:
+        raise HTTPException(status_code=413, detail=str(exc)) from exc
     attachment_filename = file.filename if file is not None else None
 
     try:
@@ -67,8 +74,11 @@ async def create_escalation(
 
     recipients = escalations_service.resolve_notification_recipients(org)
     if recipients:
-        subject = f"[Q Tower] New escalation: {category.replace('_', ' ')}"
-        message = f"{user.email} raised a new escalation.\n\nCategory: {category}\n\n{escalation.description}"
+        subject, message = render_template(
+            org,
+            "escalation_raised",
+            {"reporter_email": user.email, "category": category.replace("_", " "), "description": escalation.description},
+        )
         send_email_task.delay(recipients, subject, message, str(org.id))
 
     return _to_escalation_out(org, escalation)

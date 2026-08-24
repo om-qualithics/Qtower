@@ -1,17 +1,23 @@
 import base64
 from datetime import datetime, timedelta, timezone
 
+import bcrypt
 import httpx
 import jwt
 from sqlalchemy import func, select
 
 from apps.api.core.db import SessionLocal, org_scoped_session
 from apps.api.core.settings import settings
+from apps.api.modules.identity.constants import ADMIN_SYSTEM_ROLES, ASSIGNABLE_SYSTEM_ROLES, BUSINESS_ROLES
 from apps.api.modules.identity.models import IdpGroupRoleMap, Org, OrgSsoConnection, User
 
 JACKSON_PRODUCT = "misty"
 SESSION_COOKIE_NAME = "misty_session"
 SESSION_TTL = timedelta(hours=12)
+
+
+class IdentityValidationError(Exception):
+    pass
 
 
 def get_org() -> Org:
@@ -27,15 +33,26 @@ def get_org() -> Org:
         db.close()
 
 
-def create_sso_connection(org: Org, metadata_url: str) -> dict:
+def create_sso_connection(org: Org, metadata_url: str | None = None, metadata_xml: str | None = None) -> dict:
     """metadata_url is fetched by us, not handed to Jackson as a URL for it
     to fetch - Jackson only accepts localhost/HTTPS URLs for that, which
     breaks for our docker-network mock IdP in dev, and this way is also
-    more robust in prod (one fetch path, not two)."""
+    more robust in prod (one fetch path, not two).
+
+    metadata_xml is the alternative for IdPs that only offer a downloadable
+    metadata file rather than a stable fetchable URL (e.g. Google
+    Workspace's custom SAML app setup) - the caller pastes the file's raw
+    contents in directly and nothing is fetched over the network here."""
+    if bool(metadata_url) == bool(metadata_xml):
+        raise IdentityValidationError("Provide exactly one of metadata_url or metadata_xml")
+
     tenant = str(org.id)
-    metadata_resp = httpx.get(metadata_url, timeout=10)
-    metadata_resp.raise_for_status()
-    encoded_metadata = base64.b64encode(metadata_resp.content).decode()
+    if metadata_xml is not None:
+        encoded_metadata = base64.b64encode(metadata_xml.encode("utf-8")).decode()
+    else:
+        metadata_resp = httpx.get(metadata_url, timeout=10)
+        metadata_resp.raise_for_status()
+        encoded_metadata = base64.b64encode(metadata_resp.content).decode()
 
     resp = httpx.post(
         f"{settings.jackson_base_url}/api/v1/sso",
@@ -69,6 +86,16 @@ def create_sso_connection(org: Org, metadata_url: str) -> dict:
             )
         )
     return connection
+
+
+def get_sso_connection(org: Org) -> OrgSsoConnection | None:
+    with org_scoped_session(str(org.id)) as db:
+        connection = db.scalars(
+            select(OrgSsoConnection).where(OrgSsoConnection.org_id == org.id)
+        ).first()
+        if connection is not None:
+            db.expunge(connection)
+        return connection
 
 
 def get_login_redirect_url(org: Org, state: str) -> str:
@@ -108,7 +135,12 @@ def get_current_user(token: str | None) -> User | None:
 
     with org_scoped_session(payload["org_id"]) as db:
         user = db.get(User, payload["sub"])
-        if user is None:
+        if user is None or not user.active:
+            # A deactivated user (SCIM user.deleted, or a future manual
+            # deactivation control) must lose access immediately, not just
+            # at their next SSO login - a still-valid session JWT is the
+            # only thing standing between them and every route otherwise,
+            # since sessions are never re-validated against Jackson.
             return None
         db.expunge(user)
         return user
@@ -126,11 +158,109 @@ def list_user_emails_by_business_role(org: Org, business_roles: set[str]) -> lis
         return [u.email for u in users]
 
 
+def list_active_users(org: Org) -> list[User]:
+    with org_scoped_session(str(org.id)) as db:
+        users = db.scalars(select(User).where(User.org_id == org.id, User.active.is_(True))).all()
+        for u in users:
+            db.expunge(u)
+        return list(users)
+
+
 def get_user_by_id(org: Org, user_id) -> User | None:
     with org_scoped_session(str(org.id)) as db:
         user = db.get(User, user_id)
         if user is None or str(user.org_id) != str(org.id):
             return None
+        db.expunge(user)
+        return user
+
+
+def list_org_users(org: Org) -> list[User]:
+    with org_scoped_session(str(org.id)) as db:
+        users = db.scalars(select(User).where(User.org_id == org.id).order_by(User.email)).all()
+        for u in users:
+            db.expunge(u)
+        return list(users)
+
+
+def _assert_would_not_lock_out_admins(db, org_id, excluding_user_id, new_system_role: str) -> None:
+    """Refuses a role change that would leave the org with zero
+    admin/super_admin users - same "don't let the last door lock itself"
+    spirit as the self-approval guard in tools/service.py. Only relevant
+    when the target is currently an admin and the new role isn't."""
+    if new_system_role in ADMIN_SYSTEM_ROLES:
+        return
+    remaining_admins = db.scalar(
+        select(func.count())
+        .select_from(User)
+        .where(User.org_id == org_id, User.system_role.in_(ADMIN_SYSTEM_ROLES), User.id != excluding_user_id)
+    )
+    if not remaining_admins:
+        raise IdentityValidationError("This would leave the organization with no admin users - choose a different user to demote first.")
+
+
+def update_user_role(org: Org, target_user_id: str, business_role: str, system_role: str) -> User:
+    if business_role not in BUSINESS_ROLES:
+        raise IdentityValidationError(f"Unknown business role: {business_role!r}")
+    if system_role not in ASSIGNABLE_SYSTEM_ROLES:
+        # "super_admin" is deliberately not assignable here - see
+        # constants.ASSIGNABLE_SYSTEM_ROLES.
+        raise IdentityValidationError(f"Unknown system role: {system_role!r}")
+
+    with org_scoped_session(str(org.id)) as db:
+        user = db.get(User, target_user_id)
+        if user is None or str(user.org_id) != str(org.id):
+            raise IdentityValidationError("User not found")
+
+        _assert_would_not_lock_out_admins(db, org.id, user.id, system_role)
+
+        user.business_role = business_role
+        user.system_role = system_role
+        user.role_source = "manual"
+        db.flush()
+        db.refresh(user)
+        db.expunge(user)
+        return user
+
+
+def authenticate_super_admin(org: Org, email: str, password: str) -> User | None:
+    """Break-glass local login, entirely independent of Jackson/SAML -
+    lets a deployment operator always get into this org (to fix a broken
+    SSO connection, or to bootstrap the first real admin under an IdP that
+    can't push role data, e.g. Google Workspace) regardless of IdP state.
+    Fails closed (returns None) if SUPER_ADMIN_EMAIL/_PASSWORD_HASH aren't
+    configured - this login path simply doesn't exist until deliberately
+    set up via scripts/set_super_admin_password.py, never a blank-password
+    backdoor. On success, get-or-creates the User row with
+    system_role="super_admin" (an enum value reserved since Milestone 2's
+    schema but never granted anywhere until now) and role_source="manual" -
+    every admin-gated authz check already accepts {"admin", "super_admin"},
+    so this grants full admin rights with no permission-matrix change."""
+    if not settings.super_admin_email or not settings.super_admin_password_hash:
+        return None
+    if email.strip().lower() != settings.super_admin_email.strip().lower():
+        return None
+    if not bcrypt.checkpw(password.encode("utf-8"), settings.super_admin_password_hash.encode("utf-8")):
+        return None
+
+    with org_scoped_session(str(org.id)) as db:
+        user = db.scalars(
+            select(User).where(User.org_id == org.id, func.lower(User.email) == email.strip().lower())
+        ).first()
+        if user is None:
+            user = User(
+                org_id=org.id,
+                email=settings.super_admin_email.strip(),
+                business_role="govern",
+                system_role="super_admin",
+                role_source="manual",
+            )
+            db.add(user)
+        else:
+            user.system_role = "super_admin"
+            user.role_source = "manual"
+        db.flush()
+        db.refresh(user)
         db.expunge(user)
         return user
 

@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 import docx
 import pytest
 
+from apps.api.core import storage
 from apps.api.core.db import SessionLocal, org_scoped_session
 from apps.api.modules.identity.models import Org, User
 from apps.api.modules.policy import docgen, service
@@ -37,16 +38,29 @@ def _make_user(org: Org, email: str) -> User:
 
 
 def _make_policy_with_document(org: Org, *, status: str = "draft") -> Policy:
-    """A policy with a document already attached (storage_key set) without
-    actually rendering/uploading a real docx - approve()'s own logic
-    doesn't care what the bytes are, only that a key is present."""
+    """A policy with a document already attached (storage_key set) - a
+    real minimal docx is uploaded to that key (not just a fake string),
+    since approve() now downloads and extracts it to cache a Markdown
+    copy (Milestone 10)."""
     with org_scoped_session(str(org.id)) as db:
-        policy = Policy(org_id=org.id, answers={}, status=status, storage_key="fake/key.docx")
+        policy = Policy(org_id=org.id, answers={}, status=status, storage_key="")
         db.add(policy)
         db.flush()
         db.refresh(policy)
+        policy_id = str(policy.id)
+        storage_key = f"policies/{org.id}/{policy_id}/document.docx"
+        policy.storage_key = storage_key
+        db.flush()
+        db.refresh(policy)
         db.expunge(policy)
-        return policy
+
+    doc = docx.Document()
+    doc.add_paragraph("Test policy body text.")
+    buf = io.BytesIO()
+    doc.save(buf)
+    storage.upload_bytes(storage_key, buf.getvalue(), "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+
+    return policy
 
 
 def _delete_org(org: Org) -> None:
@@ -212,6 +226,64 @@ def test_approve_promotes_draft_and_archives_previous_active() -> None:
         _delete_org(org)
 
 
+def test_approve_caches_active_policy_as_markdown() -> None:
+    org = _make_org("Approval Markdown Org")
+    try:
+        approver = _make_user(org, "md-approver@example.com")
+        policy = _make_policy_with_document(org)
+
+        approved = service.approve(org, str(policy.id), approver)
+        assert approved.markdown_key is not None
+
+        text = service.get_active_policy_text(org)
+        assert text is not None
+        assert "Test policy body text." in text
+    finally:
+        _delete_org(org)
+
+
+def test_get_active_policy_text_backfills_missing_markdown_key() -> None:
+    """A policy approved before markdown caching existed has no
+    markdown_key yet - get_active_policy_text() should still work, by
+    lazily extracting from the docx and backfilling the key for next
+    time."""
+    org = _make_org("Approval Backfill Org")
+    try:
+        approver = _make_user(org, "backfill-approver@example.com")
+        policy = _make_policy_with_document(org)
+        approved = service.approve(org, str(policy.id), approver)
+
+        # Simulate a pre-Milestone-10 active policy: clear the cached key.
+        with org_scoped_session(str(org.id)) as db:
+            row = db.get(Policy, approved.id)
+            row.markdown_key = None
+            db.flush()
+
+        text = service.get_active_policy_text(org)
+        assert text is not None
+        assert "Test policy body text." in text
+
+        with org_scoped_session(str(org.id)) as db:
+            row = db.get(Policy, approved.id)
+            assert row.markdown_key is not None
+    finally:
+        _delete_org(org)
+
+
+def test_has_active_policy() -> None:
+    org = _make_org("Has Active Policy Org")
+    try:
+        assert service.has_active_policy(org) is False
+
+        approver = _make_user(org, "hap-approver@example.com")
+        policy = _make_policy_with_document(org)
+        service.approve(org, str(policy.id), approver)
+
+        assert service.has_active_policy(org) is True
+    finally:
+        _delete_org(org)
+
+
 def test_approve_rejects_draft_with_no_document() -> None:
     org = _make_org("Approval Missing Doc Org")
     try:
@@ -242,16 +314,35 @@ def test_approve_rejects_a_policy_that_is_not_a_draft() -> None:
         _delete_org(org)
 
 
+def _minimal_docx_bytes() -> bytes:
+    buf = io.BytesIO()
+    docx.Document().save(buf)
+    return buf.getvalue()
+
+
 def test_upload_policy_creates_a_draft_with_source_upload() -> None:
     org = _make_org("Upload Test Org")
     try:
         uploader = _make_user(org, "uploader@example.com")
-        policy = service.upload_policy(org, uploader, "my-policy.docx", b"fake docx bytes")
+        policy = service.upload_policy(org, uploader, "my-policy.docx", _minimal_docx_bytes())
 
         assert policy.status == "draft"
         assert policy.source == "upload"
         assert policy.storage_key is not None
         assert policy.generated_at is not None
+    finally:
+        _delete_org(org)
+
+
+def test_upload_policy_rejects_a_docx_extension_with_non_docx_content() -> None:
+    """The .docx-extension check alone is not enough - a plain text/binary
+    blob renamed to end in .docx must still be rejected, not accepted and
+    left to blow up later at approve() time."""
+    org = _make_org("Upload Rejects Fake Content Org")
+    try:
+        uploader = _make_user(org, "uploader4@example.com")
+        with pytest.raises(PolicyUploadError):
+            service.upload_policy(org, uploader, "my-policy.docx", b"this is not a real docx file")
     finally:
         _delete_org(org)
 
