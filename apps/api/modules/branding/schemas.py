@@ -3,12 +3,26 @@ from datetime import datetime
 from pydantic import BaseModel
 
 
-class BrandingConfigOut(BaseModel):
+class BrandingPublicConfigOut(BaseModel):
+    """Served by the unauthenticated GET /branding/config - the login page
+    needs these fields before anyone is signed in. Deliberately excludes
+    every admin-authored field below (email_templates, tool_assessment_prompt,
+    escalation_notify_override_email) - those are internal configuration,
+    not something the pre-auth screen needs, and have no business being
+    readable by an anonymous caller."""
+
     org_display_name: str | None
     logo_url: str | None
     primary_color: str | None
     secondary_color: str | None
     enabled_feature_modules: list[str] | None
+
+
+class BrandingConfigOut(BrandingPublicConfigOut):
+    """Full config including admin-authored fields - only ever returned
+    from an authenticated, branding.manage-gated route (the PATCH response
+    and GET /branding/admin-config)."""
+
     escalation_notify_override_email: str | None
     email_templates: dict[str, dict[str, str]] | None
     tool_assessment_prompt: str | None

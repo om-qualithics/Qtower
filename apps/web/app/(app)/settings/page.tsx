@@ -9,6 +9,7 @@ import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import {
   createSsoConnection,
+  fetchAdminBrandingConfig,
   fetchBrandingConfig,
   fetchCurrentUser,
   fetchLicenseStatus,
@@ -20,6 +21,7 @@ import {
   type CurrentUser,
   type LicenseStatus,
   type OrgUser,
+  type PublicBrandingConfig,
   type SsoConnectionStatus,
 } from "@/lib/api";
 
@@ -137,7 +139,7 @@ function SectionCard({ title, children }: { title: string; children: React.React
 }
 
 function BrandingSection() {
-  const [config, setConfig] = useState<BrandingConfig | null>(null);
+  const [config, setConfig] = useState<PublicBrandingConfig | null>(null);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
 
@@ -198,7 +200,7 @@ function EmailTemplatesSection() {
   const [saved, setSaved] = useState(false);
 
   useEffect(() => {
-    fetchBrandingConfig().then((c) => {
+    fetchAdminBrandingConfig().then((c) => {
       setConfig(c);
       const override = c?.email_templates?.escalation_raised;
       setSubject(override?.subject ?? DEFAULT_ESCALATION_TEMPLATE.subject);
@@ -264,7 +266,7 @@ function AiPrecheckPromptSection() {
   const [saved, setSaved] = useState(false);
 
   useEffect(() => {
-    fetchBrandingConfig().then((c) => {
+    fetchAdminBrandingConfig().then((c) => {
       setConfig(c);
       setPrompt(c?.tool_assessment_prompt ?? DEFAULT_TOOL_ASSESSMENT_PROMPT);
     });

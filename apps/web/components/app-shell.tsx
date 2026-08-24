@@ -21,7 +21,7 @@ import {
   fetchBrandingConfig,
   fetchCurrentUser,
   fetchTrainingModules,
-  type BrandingConfig,
+  type PublicBrandingConfig,
   type CurrentUser,
 } from "@/lib/api";
 import { getStoredDark, setStoredDark } from "@/lib/theme";
@@ -47,7 +47,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
   const [user, setUser] = useState<CurrentUser | null | "loading">("loading");
-  const [branding, setBranding] = useState<BrandingConfig | null>(null);
+  const [branding, setBranding] = useState<PublicBrandingConfig | null>(null);
   const [dark, setDark] = useState(false);
   const [trainingIncomplete, setTrainingIncomplete] = useState(false);
 

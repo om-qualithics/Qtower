@@ -75,19 +75,40 @@ export async function updateUserRole(id: string, businessRole: string, systemRol
 
 export type EmailTemplate = { subject: string; body: string };
 
-export type BrandingConfig = {
+// Served by the unauthenticated GET /branding/config - the login page/
+// sidebar/theme provider all need this before (or regardless of) auth.
+// Deliberately does not include the admin-authored fields below - see
+// BrandingConfig and fetchAdminBrandingConfig().
+export type PublicBrandingConfig = {
   org_display_name: string | null;
   logo_url: string | null;
   primary_color: string | null;
   secondary_color: string | null;
   enabled_feature_modules: string[] | null;
+};
+
+// Full config including admin-authored fields - only ever returned from
+// an authenticated, branding.manage-gated route (PATCH's response and
+// fetchAdminBrandingConfig() below). Never fetched pre-auth.
+export type BrandingConfig = PublicBrandingConfig & {
   escalation_notify_override_email: string | null;
   email_templates: Record<string, EmailTemplate> | null;
   tool_assessment_prompt: string | null;
 };
 
-export async function fetchBrandingConfig(): Promise<BrandingConfig | null> {
+export async function fetchBrandingConfig(): Promise<PublicBrandingConfig | null> {
   const res = await fetch(`${API_BASE_URL}/branding/config`);
+  if (!res.ok) {
+    return null;
+  }
+  return res.json();
+}
+
+// Authenticated counterpart of fetchBrandingConfig() - used by Settings
+// sections (email templates, AI precheck prompt) that need to read the
+// current admin-authored values, not just the public branding subset.
+export async function fetchAdminBrandingConfig(): Promise<BrandingConfig | null> {
+  const res = await fetch(`${API_BASE_URL}/branding/admin-config`, { credentials: "include" });
   if (!res.ok) {
     return null;
   }

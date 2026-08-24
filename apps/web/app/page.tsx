@@ -7,7 +7,7 @@ import {
   fetchCurrentUser,
   loginUrl,
   superAdminLogin,
-  type BrandingConfig,
+  type PublicBrandingConfig,
   type CurrentUser,
 } from "@/lib/api";
 import { getStoredDark, setStoredDark } from "@/lib/theme";
@@ -15,7 +15,7 @@ import { getStoredDark, setStoredDark } from "@/lib/theme";
 export default function Home() {
   const router = useRouter();
   const [user, setUser] = useState<CurrentUser | null | "loading">("loading");
-  const [branding, setBranding] = useState<BrandingConfig | null>(null);
+  const [branding, setBranding] = useState<PublicBrandingConfig | null>(null);
   const [dark, setDark] = useState(false);
   const [showAdminLogin, setShowAdminLogin] = useState(false);
   const [adminEmail, setAdminEmail] = useState("");
