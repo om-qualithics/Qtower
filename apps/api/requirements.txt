@@ -105,4 +105,23 @@ bandit==1.8.0
 # and docxtpl's Environment are both plain, non-sandboxed, and only ever
 # render our own static templates) - upgraded anyway since it's a free fix.
 Jinja2==3.1.6  # already a transitive dep of docxtpl - pinned directly now that codescan/report.py uses it itself
-weasyprint==63.1  # HTML+CSS -> PDF for the scan report; needs system libs, see infra/Dockerfile.api
+# 69.0 (was 63.1) - fixes CVE-2025-68616 (SSRF protection bypass via HTTP
+# redirect in the default URL fetcher, Trivy-flagged in a real Code Scan of
+# this repo), fixed in 68.0. Jumped to latest rather than 68.0 given the
+# pattern this session hit with litellm/python-multipart (multiple CVEs in
+# one dependency across successive re-scans). Practical exposure here was
+# already close to zero even before this bump: exploiting it needs
+# attacker-controlled HTML containing an external resource URL (an
+# <img src=...>, an @import, etc.) in the string handed to HTML(string=...
+# ).write_pdf() in codescan/report.py, and that string's only untrusted
+# content (finding descriptions/file paths from the scanned repo) already
+# goes through Jinja2's autoescape=True (see report.py) before it ever
+# reaches the template - no raw tag can survive to be interpreted as an
+# element with a fetchable URL. Upgraded anyway since it's a free fix and
+# closes the finding outright rather than relying on defense-in-depth
+# reasoning alone. HTML+CSS -> PDF for the scan report; needs system libs,
+# see infra/Dockerfile.api. A real scan's PDF report was downloaded and
+# opened after this bump to confirm rendering still works, not just that
+# the package installs (weasyprint doesn't import on native Windows at
+# all, so this can only be verified via the Linux Docker image).
+weasyprint==69.0
