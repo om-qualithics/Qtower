@@ -8,6 +8,7 @@ Design/
 aboutproject.md
 policy_builder.md
 FullSmokeTest.md
+Qtower_CodeScan_Phase1_Handoff.md
 
 # Environment / secrets
 .env
@@ -35,6 +36,7 @@ build/
 # Local infra data (bind-mounted volumes)
 infra/data/
 infra/dev-certs/
+infra/logs/
 
 # OS / editor
 .DS_Store

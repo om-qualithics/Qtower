@@ -80,6 +80,8 @@ def test_policy_approve_is_stricter_than_manage_assure_cannot_approve() -> None:
 def test_escalations_create_allowed_for_any_authenticated_user() -> None:
     assert can(_user("operator", "user"), "escalations.create")
     assert can(_user("govern", "super_admin"), "escalations.create")
+    assert can(_user("operator", "user"), "escalations.view")
+    assert can(_user("govern", "super_admin"), "escalations.view")
 
 
 def test_escalations_manage_requires_govern_assure_or_system_admin() -> None:
@@ -104,3 +106,21 @@ def test_training_manage_requires_govern_assure_or_system_admin() -> None:
 def test_dashboard_view_allowed_for_any_authenticated_user() -> None:
     assert can(_user("operator", "user"), "dashboard.view")
     assert can(_user("govern", "super_admin"), "dashboard.view")
+
+
+def test_codescan_connect_is_assure_only_not_govern() -> None:
+    """Deliberate deviation from every other "manage"-style permission in
+    this matrix (which is always {govern, assure}) - explicit instruction
+    for Milestone 13, asserted here so a future edit that "fixes" this
+    back to the usual shape gets caught."""
+    assert can(_user("assure", "user"), "codescan.connect")
+    assert not can(_user("govern", "user"), "codescan.connect")
+    assert not can(_user("operator", "user"), "codescan.connect")
+    assert can(_user("operator", "admin"), "codescan.connect")
+
+
+def test_codescan_run_and_view_allowed_for_any_authenticated_user() -> None:
+    for action in ("codescan.run", "codescan.view"):
+        assert can(_user("govern", "user"), action)
+        assert can(_user("assure", "user"), action)
+        assert can(_user("operator", "user"), action)

@@ -38,6 +38,7 @@ _PERMISSIONS: dict[str, list[dict[str, set[str] | None]]] = {
     ],
     "policy.view": [{"system_role": None, "business_role": None}],
     "escalations.create": [{"system_role": None, "business_role": None}],
+    "escalations.view": [{"system_role": None, "business_role": None}],
     "escalations.manage": [
         {"system_role": None, "business_role": {"govern", "assure"}},
         {"system_role": {"admin", "super_admin"}, "business_role": None},
@@ -48,6 +49,17 @@ _PERMISSIONS: dict[str, list[dict[str, set[str] | None]]] = {
         {"system_role": {"admin", "super_admin"}, "business_role": None},
     ],
     "dashboard.view": [{"system_role": None, "business_role": None}],
+    # Deliberately assure-only, NOT the usual {govern, assure} shape every
+    # other "manage"-style permission in this matrix uses - explicit
+    # instruction (Milestone 13), not a copy-paste miss.
+    "codescan.connect": [
+        {"system_role": None, "business_role": {"assure"}},
+        {"system_role": {"admin", "super_admin"}, "business_role": None},
+    ],
+    # Open to every role for now - "we will put in segregation later"
+    # (Milestone 13), matching training.view/escalations.create's shape.
+    "codescan.run": [{"system_role": None, "business_role": None}],
+    "codescan.view": [{"system_role": None, "business_role": None}],
 }
 
 

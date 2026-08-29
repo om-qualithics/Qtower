@@ -63,11 +63,9 @@ def test_send_email_live_mode_without_smtp_host_raises_clear_error(monkeypatch) 
 def test_render_template_falls_back_to_default_when_no_override_set() -> None:
     org = _make_org("Templates Default Org")
     try:
-        subject, body = render_template(
-            org, "escalation_raised", {"reporter_email": "a@example.com", "category": "other", "description": "d"}
-        )
+        subject, body = render_template(org, "escalation_raised", {"category": "other", "description": "d"})
         assert subject == "[Q Tower] New escalation: other"
-        assert "a@example.com raised a new escalation." in body
+        assert "A new anonymous escalation was raised." in body
         assert "d" in body
     finally:
         _delete_org(org)
@@ -82,16 +80,14 @@ def test_render_template_uses_org_override_when_set() -> None:
                 "email_templates": {
                     "escalation_raised": {
                         "subject": "Custom: {{category}}",
-                        "body": "From {{reporter_email}}: {{description}}",
+                        "body": "New alert: {{description}}",
                     }
                 }
             },
         )
-        subject, body = render_template(
-            org, "escalation_raised", {"reporter_email": "a@example.com", "category": "other", "description": "d"}
-        )
+        subject, body = render_template(org, "escalation_raised", {"category": "other", "description": "d"})
         assert subject == "Custom: other"
-        assert body == "From a@example.com: d"
+        assert body == "New alert: d"
     finally:
         _delete_org(org)
 
@@ -103,9 +99,7 @@ def test_render_template_survives_stray_literal_brace_in_custom_template() -> No
             org,
             {"email_templates": {"escalation_raised": {"subject": "team{s}: {{category}}", "body": "{{description}}"}}},
         )
-        subject, body = render_template(
-            org, "escalation_raised", {"reporter_email": "a@example.com", "category": "other", "description": "d"}
-        )
+        subject, body = render_template(org, "escalation_raised", {"category": "other", "description": "d"})
         assert subject == "team{s}: other"
         assert body == "d"
     finally:

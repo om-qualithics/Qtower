@@ -1,3 +1,8 @@
+# code_scan_critical is deliberately absent - Code Scan critical findings no
+# longer create escalations (see codescan/tasks.py) since Raise Alert is
+# anonymous and a code-scan-triggered alert would have an obvious "reporter"
+# (whoever ran the scan), breaking that guarantee. The Postgres enum type
+# still has the value (see migration 0013's note) but the app never writes it.
 CATEGORIES = ("policy_violation", "unapproved_tool_use", "data_exposure_concern", "other")
 
 # Screenshots are the single most likely attachment for an AI-misuse

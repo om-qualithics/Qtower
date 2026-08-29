@@ -1,3 +1,5 @@
+from apps.api.modules.codescan import service as codescan_service
+from apps.api.modules.codescan.schemas import ScanRunOut
 from apps.api.modules.dashboard.schemas import DashboardSummaryOut
 from apps.api.modules.escalations import service as escalations_service
 from apps.api.modules.escalations.schemas import EscalationOut
@@ -26,7 +28,14 @@ def _can_approve_tools(user: User) -> bool:
     return user.business_role in ("govern", "assure") or user.system_role in ("admin", "super_admin")
 
 
-def _to_policy_out(policy) -> PolicyListItemOut:
+def _resolve_email(org: Org, user_id) -> str | None:
+    if not user_id:
+        return None
+    user = identity_service.get_user_by_id(org, user_id)
+    return user.email if user else None
+
+
+def _to_policy_out(org: Org, policy) -> PolicyListItemOut:
     return PolicyListItemOut(
         id=str(policy.id),
         status=policy.status,
@@ -36,6 +45,8 @@ def _to_policy_out(policy) -> PolicyListItemOut:
         version=policy.version,
         policy_owner_name=policy.policy_owner_name,
         created_by=str(policy.created_by) if policy.created_by else None,
+        created_by_email=_resolve_email(org, policy.created_by),
+        approved_by_email=_resolve_email(org, policy.approved_by),
         generated_at=policy.generated_at,
         approved_at=policy.approved_at,
         created_at=policy.created_at,
@@ -67,7 +78,6 @@ def _to_tool_request_out(org: Org, request) -> ToolRequestOut:
 
 
 def _to_escalation_out(org: Org, escalation) -> EscalationOut:
-    reporter = identity_service.get_user_by_id(org, escalation.reporter_id)
     return EscalationOut(
         id=str(escalation.id),
         category=escalation.category,
@@ -75,8 +85,6 @@ def _to_escalation_out(org: Org, escalation) -> EscalationOut:
         related_tool_request_id=str(escalation.related_tool_request_id) if escalation.related_tool_request_id else None,
         related_policy_id=str(escalation.related_policy_id) if escalation.related_policy_id else None,
         status=escalation.status,
-        reporter_id=str(escalation.reporter_id),
-        reporter_email=reporter.email if reporter else None,
         assigned_to=str(escalation.assigned_to) if escalation.assigned_to else None,
         resolution_note=escalation.resolution_note,
         has_attachment=escalation.attachment_key is not None,
@@ -124,6 +132,23 @@ def _training_summary(org: Org) -> TrainingSummaryOut:
     return TrainingSummaryOut(modules=module_summaries, org_completion_pct=round(org_pct, 1))
 
 
+def _to_scan_out(org: Org, scan) -> ScanRunOut:
+    requester = identity_service.get_user_by_id(org, scan.triggered_by)
+    return ScanRunOut(
+        id=str(scan.id),
+        repo_full_name=scan.repo_full_name,
+        commit_sha=scan.commit_sha,
+        status=scan.status,
+        triggered_by=str(scan.triggered_by),
+        triggered_by_email=requester.email if requester else None,
+        error_message=scan.error_message,
+        finding_counts=codescan_service.finding_counts(org, str(scan.id)) if scan.status == "complete" else {},
+        started_at=scan.started_at,
+        completed_at=scan.completed_at,
+        created_at=scan.created_at,
+    )
+
+
 def get_summary(org: Org, user: User) -> DashboardSummaryOut:
     """Pure composition over each module's already-proven service layer -
     no new business logic. Role gating happens here (server-side, defense
@@ -138,8 +163,8 @@ def get_summary(org: Org, user: User) -> DashboardSummaryOut:
     all_policies = policy_service.list_policies(org)
     awaiting_approval = [p for p in all_policies if p.status == "draft" and p.storage_key is not None]
 
-    my_policy_drafts = [_to_policy_out(p) for p in awaiting_approval if assure and str(p.created_by) == str(user.id)]
-    pending_policy_drafts = [_to_policy_out(p) for p in awaiting_approval] if govern else []
+    my_policy_drafts = [_to_policy_out(org, p) for p in awaiting_approval if assure and str(p.created_by) == str(user.id)]
+    pending_policy_drafts = [_to_policy_out(org, p) for p in awaiting_approval] if govern else []
 
     my_tool_requests_raw = [r for r in tools_service.list_requests(org, mine=user) if r.status == "pending"]
     my_tool_requests = [_to_tool_request_out(org, r) for r in my_tool_requests_raw]
@@ -151,8 +176,8 @@ def get_summary(org: Org, user: User) -> DashboardSummaryOut:
         tool_request_counts = {status: sum(1 for r in all_requests if r.status == status) for status in TOOL_REQUEST_STATUSES}
         pending_tool_requests = [_to_tool_request_out(org, r) for r in all_requests if r.status == "pending"]
 
-    my_alerts = [_to_escalation_out(org, e) for e in escalations_service.list_escalations(org, mine=user)]
-
+    # No my_alerts - escalations are anonymous, so there is no per-user
+    # "alerts you raised" list to hand back (see escalations/models.py).
     pending_alerts: list[EscalationOut] = []
     escalation_counts: dict[str, int] = {}
     if can_approve:
@@ -163,15 +188,19 @@ def get_summary(org: Org, user: User) -> DashboardSummaryOut:
     my_training = [_to_module_out(v) for v in training_service.list_modules(org, user)]
     training_summary = _training_summary(org) if can_approve else None
 
+    my_recent_scans = [_to_scan_out(org, s) for s in codescan_service.list_scans(org, mine=user)[:10]]
+    scan_finding_counts = codescan_service.org_wide_finding_counts(org) if can_approve else {}
+
     return DashboardSummaryOut(
         pending_policy_drafts=pending_policy_drafts,
         pending_tool_requests=pending_tool_requests,
         pending_alerts=pending_alerts,
         my_policy_drafts=my_policy_drafts,
         my_tool_requests=my_tool_requests,
-        my_alerts=my_alerts,
         my_training=my_training,
         training_summary=training_summary,
         tool_request_counts=tool_request_counts,
         escalation_counts=escalation_counts,
+        my_recent_scans=my_recent_scans,
+        scan_finding_counts=scan_finding_counts,
     )

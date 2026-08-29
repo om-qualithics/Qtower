@@ -47,9 +47,8 @@ def _delete_org(org: Org) -> None:
 def test_create_escalation_rejects_unknown_category() -> None:
     org = _make_org("Escalation Category Org")
     try:
-        reporter = _make_user(org, "reporter@example.com")
         with pytest.raises(EscalationValidationError):
-            service.create_escalation(org, reporter, "not_a_real_category", "something happened")
+            service.create_escalation(org, "not_a_real_category", "something happened")
     finally:
         _delete_org(org)
 
@@ -57,9 +56,20 @@ def test_create_escalation_rejects_unknown_category() -> None:
 def test_create_escalation_rejects_empty_description() -> None:
     org = _make_org("Escalation Empty Org")
     try:
-        reporter = _make_user(org, "reporter2@example.com")
         with pytest.raises(EscalationValidationError):
-            service.create_escalation(org, reporter, "other", "   ")
+            service.create_escalation(org, "other", "   ")
+    finally:
+        _delete_org(org)
+
+
+def test_create_escalation_never_stores_a_reporter() -> None:
+    """Anonymity is the whole point - the model has no reporter_id column
+    at all (migration 0013), so this is really just proving the row has no
+    such attribute rather than asserting a value is null."""
+    org = _make_org("Escalation Anonymous Org")
+    try:
+        escalation = service.create_escalation(org, "other", "no one should know who wrote this")
+        assert not hasattr(escalation, "reporter_id")
     finally:
         _delete_org(org)
 
@@ -92,9 +102,8 @@ def test_resolve_notification_recipients_uses_override_when_configured() -> None
 def test_update_escalation_status_transitions_and_rejects_unknown_status() -> None:
     org = _make_org("Escalation Update Org")
     try:
-        reporter = _make_user(org, "reporter3@example.com")
         manager = _make_user(org, "govern3@example.com", "govern")
-        escalation = service.create_escalation(org, reporter, "other", "needs review")
+        escalation = service.create_escalation(org, "other", "needs review")
 
         updated = service.update_escalation(
             org, str(escalation.id), status="in_review", assigned_to=str(manager.id)
@@ -109,17 +118,20 @@ def test_update_escalation_status_transitions_and_rejects_unknown_status() -> No
         _delete_org(org)
 
 
-def test_list_escalations_mine_filters_to_reporter() -> None:
+def test_list_escalations_splits_current_and_resolved() -> None:
     org = _make_org("Escalation List Org")
     try:
-        reporter_a = _make_user(org, "reporter_a@example.com")
-        reporter_b = _make_user(org, "reporter_b@example.com")
-        service.create_escalation(org, reporter_a, "other", "from A")
-        service.create_escalation(org, reporter_b, "other", "from B")
+        a = service.create_escalation(org, "other", "from A")
+        service.create_escalation(org, "other", "from B")
+        service.update_escalation(org, str(a.id), status="resolved", resolution_note="Handled.")
 
-        mine = service.list_escalations(org, mine=reporter_a)
-        assert len(mine) == 1
-        assert mine[0].description == "from A"
+        current = service.list_escalations(org, resolved=False)
+        assert len(current) == 1
+        assert current[0].description == "from B"
+
+        resolved = service.list_escalations(org, resolved=True)
+        assert len(resolved) == 1
+        assert resolved[0].description == "from A"
 
         everyone = service.list_escalations(org)
         assert len(everyone) == 2
@@ -130,8 +142,7 @@ def test_list_escalations_mine_filters_to_reporter() -> None:
 def test_update_escalation_resolved_requires_a_resolution_note() -> None:
     org = _make_org("Escalation Resolve Note Org")
     try:
-        reporter = _make_user(org, "reporter4@example.com")
-        escalation = service.create_escalation(org, reporter, "other", "needs review")
+        escalation = service.create_escalation(org, "other", "needs review")
 
         with pytest.raises(EscalationValidationError):
             service.update_escalation(org, str(escalation.id), status="resolved")
@@ -155,10 +166,8 @@ def test_update_escalation_resolved_requires_a_resolution_note() -> None:
 def test_create_escalation_with_attachment_round_trips_through_storage() -> None:
     org = _make_org("Escalation Attachment Org")
     try:
-        reporter = _make_user(org, "reporter5@example.com")
         escalation = service.create_escalation(
             org,
-            reporter,
             "other",
             "see attached screenshot",
             attachment_filename="evidence.png",
@@ -177,11 +186,9 @@ def test_create_escalation_with_attachment_round_trips_through_storage() -> None
 def test_create_escalation_rejects_unsupported_attachment_type() -> None:
     org = _make_org("Escalation Bad Attachment Org")
     try:
-        reporter = _make_user(org, "reporter6@example.com")
         with pytest.raises(EscalationValidationError):
             service.create_escalation(
                 org,
-                reporter,
                 "other",
                 "see attached script",
                 attachment_filename="script.exe",
@@ -194,11 +201,10 @@ def test_create_escalation_rejects_unsupported_attachment_type() -> None:
 def test_create_escalation_rejects_oversized_attachment() -> None:
     org = _make_org("Escalation Oversized Attachment Org")
     try:
-        reporter = _make_user(org, "reporter7@example.com")
         oversized = b"x" * (20 * 1024 * 1024 + 1)
         with pytest.raises(EscalationValidationError):
             service.create_escalation(
-                org, reporter, "other", "big file", attachment_filename="big.pdf", attachment_bytes=oversized
+                org, "other", "big file", attachment_filename="big.pdf", attachment_bytes=oversized
             )
     finally:
         _delete_org(org)

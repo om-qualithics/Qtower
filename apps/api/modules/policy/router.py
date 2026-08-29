@@ -29,7 +29,14 @@ def _require_user(session_token: str | None):
     return user
 
 
-def _to_policy_out(policy) -> PolicyOut:
+def _resolve_email(org, user_id) -> str | None:
+    if not user_id:
+        return None
+    user = identity_service.get_user_by_id(org, user_id)
+    return user.email if user else None
+
+
+def _to_policy_out(policy, org) -> PolicyOut:
     return PolicyOut(
         id=str(policy.id),
         status=policy.status,
@@ -41,6 +48,8 @@ def _to_policy_out(policy) -> PolicyOut:
         approver_name=policy.approver_name,
         answers=policy.answers,
         created_by=str(policy.created_by) if policy.created_by else None,
+        created_by_email=_resolve_email(org, policy.created_by),
+        approved_by_email=_resolve_email(org, policy.approved_by),
         generated_at=policy.generated_at,
         approved_at=policy.approved_at,
         created_at=policy.created_at,
@@ -93,6 +102,8 @@ def list_policies(misty_session: str | None = Cookie(default=None)):
             version=p.version,
             policy_owner_name=p.policy_owner_name,
             created_by=str(p.created_by) if p.created_by else None,
+            created_by_email=_resolve_email(org, p.created_by),
+            approved_by_email=_resolve_email(org, p.approved_by),
             generated_at=p.generated_at,
             approved_at=p.approved_at,
             created_at=p.created_at,
@@ -109,7 +120,7 @@ def create_policy(misty_session: str | None = Cookie(default=None)):
         raise HTTPException(status_code=403, detail="Forbidden")
     org = identity_service.get_org()
     policy = policy_service.create_draft(org, user)
-    return _to_policy_out(policy)
+    return _to_policy_out(policy, org)
 
 
 @router.post("/upload", response_model=PolicyOut)
@@ -126,7 +137,7 @@ async def upload_policy(file: UploadFile = File(...), misty_session: str | None 
         policy = policy_service.upload_policy(org, user, file.filename or "policy.docx", file_bytes)
     except PolicyUploadError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return _to_policy_out(policy)
+    return _to_policy_out(policy, org)
 
 
 @router.get("/{policy_id}", response_model=PolicyOut)
@@ -138,7 +149,7 @@ def get_policy(policy_id: str, misty_session: str | None = Cookie(default=None))
     policy = policy_service.get_policy(org, policy_id)
     if policy is None:
         raise HTTPException(status_code=404, detail="Policy not found")
-    return _to_policy_out(policy)
+    return _to_policy_out(policy, org)
 
 
 @router.patch("/{policy_id}", response_model=PolicyOut)
@@ -150,7 +161,7 @@ def update_policy_step(policy_id: str, body: PolicyStepUpdate, misty_session: st
     policy = policy_service.update_step(org, policy_id, body.step, body.answers)
     if policy is None:
         raise HTTPException(status_code=404, detail="Policy not found")
-    return _to_policy_out(policy)
+    return _to_policy_out(policy, org)
 
 
 @router.post("/{policy_id}/generate", response_model=PolicyOut)
@@ -165,7 +176,7 @@ def generate_policy(policy_id: str, misty_session: str | None = Cookie(default=N
         raise HTTPException(status_code=400, detail={"missing_required": exc.missing_required}) from exc
     if policy is None:
         raise HTTPException(status_code=404, detail="Policy not found")
-    return _to_policy_out(policy)
+    return _to_policy_out(policy, org)
 
 
 @router.post("/{policy_id}/approve", response_model=PolicyOut)
@@ -178,7 +189,7 @@ def approve_policy(policy_id: str, misty_session: str | None = Cookie(default=No
         policy = policy_service.approve(org, policy_id, user)
     except PolicyApprovalError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return _to_policy_out(policy)
+    return _to_policy_out(policy, org)
 
 
 @router.get("/{policy_id}/download", response_model=PolicyDownloadOut)

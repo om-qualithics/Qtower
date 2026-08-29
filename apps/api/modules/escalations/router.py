@@ -23,7 +23,6 @@ def _require_user(session_token: str | None):
 
 
 def _to_escalation_out(org, escalation) -> EscalationOut:
-    reporter = identity_service.get_user_by_id(org, escalation.reporter_id)
     return EscalationOut(
         id=str(escalation.id),
         category=escalation.category,
@@ -31,8 +30,6 @@ def _to_escalation_out(org, escalation) -> EscalationOut:
         related_tool_request_id=str(escalation.related_tool_request_id) if escalation.related_tool_request_id else None,
         related_policy_id=str(escalation.related_policy_id) if escalation.related_policy_id else None,
         status=escalation.status,
-        reporter_id=str(escalation.reporter_id),
-        reporter_email=reporter.email if reporter else None,
         assigned_to=str(escalation.assigned_to) if escalation.assigned_to else None,
         resolution_note=escalation.resolution_note,
         has_attachment=escalation.attachment_key is not None,
@@ -60,10 +57,13 @@ async def create_escalation(
         raise HTTPException(status_code=413, detail=str(exc)) from exc
     attachment_filename = file.filename if file is not None else None
 
+    # user is required to be authenticated to raise an alert (escalations.
+    # create, checked above), but is deliberately never passed into
+    # create_escalation() or into the notification below - anonymity means
+    # not persisting or emailing who raised it, not just hiding it in the UI.
     try:
         escalation = escalations_service.create_escalation(
             org,
-            user,
             category,
             description,
             attachment_filename=attachment_filename,
@@ -77,7 +77,7 @@ async def create_escalation(
         subject, message = render_template(
             org,
             "escalation_raised",
-            {"reporter_email": user.email, "category": category.replace("_", " "), "description": escalation.description},
+            {"category": category.replace("_", " "), "description": escalation.description},
         )
         send_email_task.delay(recipients, subject, message, str(org.id))
 
@@ -87,28 +87,30 @@ async def create_escalation(
 @router.get("/{escalation_id}/attachment", response_model=EscalationDownloadOut)
 def get_escalation_attachment(escalation_id: str, misty_session: str | None = Cookie(default=None)):
     user = _require_user(misty_session)
+    # No reporter-self-access branch - there is no reporter identity to
+    # check against. Only escalations.manage may download evidence.
+    if not authz_service.can(user, "escalations.manage"):
+        raise HTTPException(status_code=403, detail="Forbidden")
     org = identity_service.get_org()
     escalation = escalations_service.get_escalation(org, escalation_id)
     if escalation is None:
         raise HTTPException(status_code=404, detail="Escalation not found")
-    is_reporter = str(escalation.reporter_id) == str(user.id)
-    if not is_reporter and not authz_service.can(user, "escalations.manage"):
-        raise HTTPException(status_code=403, detail="Forbidden")
     if not escalation.attachment_key:
         raise HTTPException(status_code=404, detail="This escalation has no attachment")
     return EscalationDownloadOut(download_url=storage.presigned_url(escalation.attachment_key, expires_seconds=300))
 
 
 @router.get("/", response_model=list[EscalationOut])
-def list_escalations(mine: bool = Query(default=False), misty_session: str | None = Cookie(default=None)):
+def list_escalations(resolved: bool | None = Query(default=None), misty_session: str | None = Cookie(default=None)):
+    # Visible to every authenticated user, deliberately - Current and
+    # Resolved Escalations are both shared, org-wide lists (no "mine"),
+    # since hiding a per-user view would be the only way anonymity could
+    # ever leak. Only *acting* on one (PATCH, below) stays manage-gated.
     user = _require_user(misty_session)
+    if not authz_service.can(user, "escalations.view"):
+        raise HTTPException(status_code=403, detail="Forbidden")
     org = identity_service.get_org()
-    if mine:
-        escalations = escalations_service.list_escalations(org, mine=user)
-    else:
-        if not authz_service.can(user, "escalations.manage"):
-            raise HTTPException(status_code=403, detail="Forbidden")
-        escalations = escalations_service.list_escalations(org)
+    escalations = escalations_service.list_escalations(org, resolved=resolved)
     return [_to_escalation_out(org, e) for e in escalations]
 
 

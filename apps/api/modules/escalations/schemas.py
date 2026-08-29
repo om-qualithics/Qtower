@@ -10,8 +10,6 @@ class EscalationOut(BaseModel):
     related_tool_request_id: str | None
     related_policy_id: str | None
     status: str
-    reporter_id: str
-    reporter_email: str | None
     assigned_to: str | None
     resolution_note: str | None
     has_attachment: bool

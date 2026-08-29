@@ -7,8 +7,11 @@ from apps.api.modules.identity.models import Org
 # email_templates can hold a per-org override under the same key.
 DEFAULT_TEMPLATES: dict[str, dict[str, str]] = {
     "escalation_raised": {
+        # Deliberately no reporter/who-raised-this field anywhere in this
+        # template - Raise Alert is anonymous, so the notification itself
+        # must not be the leak. See escalations/models.py's docstring.
         "subject": "[Q Tower] New escalation: {{category}}",
-        "body": "{{reporter_email}} raised a new escalation.\n\nCategory: {{category}}\n\n{{description}}",
+        "body": "A new anonymous escalation was raised.\n\nCategory: {{category}}\n\n{{description}}",
     },
 }
 

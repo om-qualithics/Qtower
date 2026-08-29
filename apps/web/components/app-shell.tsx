@@ -13,6 +13,7 @@ import {
   LogOut,
   Moon,
   Sun,
+  Bug,
 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
@@ -32,6 +33,7 @@ const NAV_ITEMS = [
   { label: "AI Tools", href: "/tools", icon: Grid3x3, enabled: true },
   { label: "Raise Alert", href: "/escalations", icon: AlertTriangle, enabled: true },
   { label: "Training", href: "/training", icon: GraduationCap, enabled: true },
+  { label: "Code Scan", href: "/codescan", icon: Bug, enabled: true },
   { label: "Settings", href: "/settings", icon: Settings, enabled: true },
 ];
 

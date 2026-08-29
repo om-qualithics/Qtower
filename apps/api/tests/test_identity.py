@@ -129,7 +129,7 @@ def test_update_user_role_allows_demotion_when_another_admin_remains() -> None:
 
 def test_authenticate_super_admin_disabled_when_unconfigured(monkeypatch) -> None:
     monkeypatch.setattr("apps.api.modules.identity.service.settings.super_admin_email", "")
-    monkeypatch.setattr("apps.api.modules.identity.service.settings.super_admin_password_hash", "")
+    monkeypatch.setattr("apps.api.modules.identity.service.settings.super_admin_password_hash_b64", "")
     org = _make_org("Super Admin Disabled Org")
     try:
         assert service.authenticate_super_admin(org, "anyone@example.com", "anything") is None
@@ -138,11 +138,16 @@ def test_authenticate_super_admin_disabled_when_unconfigured(monkeypatch) -> Non
 
 
 def test_authenticate_super_admin_wrong_credentials(monkeypatch) -> None:
+    import base64
+
     import bcrypt
 
     password_hash = bcrypt.hashpw(b"correct-horse", bcrypt.gensalt()).decode("utf-8")
     monkeypatch.setattr("apps.api.modules.identity.service.settings.super_admin_email", "root@example.com")
-    monkeypatch.setattr("apps.api.modules.identity.service.settings.super_admin_password_hash", password_hash)
+    monkeypatch.setattr(
+        "apps.api.modules.identity.service.settings.super_admin_password_hash_b64",
+        base64.b64encode(password_hash.encode()).decode(),
+    )
     org = _make_org("Super Admin Wrong Creds Org")
     try:
         assert service.authenticate_super_admin(org, "root@example.com", "wrong-password") is None
@@ -152,11 +157,16 @@ def test_authenticate_super_admin_wrong_credentials(monkeypatch) -> None:
 
 
 def test_authenticate_super_admin_creates_and_grants_role(monkeypatch) -> None:
+    import base64
+
     import bcrypt
 
     password_hash = bcrypt.hashpw(b"correct-horse", bcrypt.gensalt()).decode("utf-8")
     monkeypatch.setattr("apps.api.modules.identity.service.settings.super_admin_email", "root@example.com")
-    monkeypatch.setattr("apps.api.modules.identity.service.settings.super_admin_password_hash", password_hash)
+    monkeypatch.setattr(
+        "apps.api.modules.identity.service.settings.super_admin_password_hash_b64",
+        base64.b64encode(password_hash.encode()).decode(),
+    )
     org = _make_org("Super Admin Grant Org")
     try:
         user = service.authenticate_super_admin(org, "root@example.com", "correct-horse")

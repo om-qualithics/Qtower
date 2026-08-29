@@ -2,15 +2,50 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
+# git: `git clone` in codescan/tasks.py. curl/ca-certificates: fetching the
+# Gitleaks/Trivy release binaries below (neither ships as a pip package -
+# both are Go binaries). The libpango/libgdk-pixbuf/libffi/shared-mime-info
+# set is weasyprint's own documented Debian dependency list (codescan's PDF
+# report renderer) - semgrep/bandit are plain pip packages, already in
+# requirements.txt, no extra system packages needed for them.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git curl ca-certificates \
+    libpango-1.0-0 libpangocairo-1.0-0 libgdk-pixbuf-2.0-0 libffi-dev shared-mime-info \
+    && rm -rf /var/lib/apt/lists/*
+
+# Gitleaks and Trivy have no pip package - fetched as prebuilt release
+# binaries. Versions pinned deliberately (same convention as Jackson's
+# pinned image tag in docker-compose.yml) - bump periodically, don't
+# silently float to latest.
+ARG GITLEAKS_VERSION=8.21.2
+ARG TRIVY_VERSION=0.74.0
+RUN curl -fL -o /tmp/gitleaks.tar.gz "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
+    && tar -xzf /tmp/gitleaks.tar.gz -C /usr/local/bin gitleaks \
+    && curl -fL -o /tmp/trivy.tar.gz "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz" \
+    && tar -xzf /tmp/trivy.tar.gz -C /usr/local/bin trivy \
+    && rm -f /tmp/gitleaks.tar.gz /tmp/trivy.tar.gz
+
 COPY apps/api/requirements.txt apps/api/requirements.txt
 RUN pip install --no-cache-dir -r apps/api/requirements.txt
 
-COPY apps/__init__.py apps/__init__.py
-COPY apps/api apps/api
-COPY alembic alembic
-COPY alembic.ini alembic.ini
+# Non-root by default (Trivy-flagged in a real Code Scan of this repo - the
+# image ran as root, a real hardening gap, not a false positive). git clone
+# (codescan/tasks.py) and every scanner subprocess run as this user too -
+# none of them need root, and it caps the blast radius of a compromised
+# scan (a malicious repo's build/install scripts, semgrep/bandit's own
+# execution) to a non-privileged account rather than root inside the
+# container. tempfile.TemporaryDirectory() clones go to /tmp, which is
+# world-writable by default - no extra chown needed for that path.
+RUN useradd --create-home --uid 10001 --shell /usr/sbin/nologin appuser
+
+COPY --chown=appuser:appuser apps/__init__.py apps/__init__.py
+COPY --chown=appuser:appuser apps/api apps/api
+COPY --chown=appuser:appuser alembic alembic
+COPY --chown=appuser:appuser alembic.ini alembic.ini
 
 ENV PYTHONPATH=/app
+
+USER appuser
 
 EXPOSE 8000
 CMD ["uvicorn", "apps.api.main:app", "--host", "0.0.0.0", "--port", "8000"]

@@ -10,7 +10,7 @@ from apps.api.modules.branding import service as branding_service
 from apps.api.modules.escalations.constants import ALLOWED_ATTACHMENT_EXTENSIONS, CATEGORIES, escalation_attachment_key
 from apps.api.modules.escalations.models import Escalation
 from apps.api.modules.identity import service as identity_service
-from apps.api.modules.identity.models import Org, User
+from apps.api.modules.identity.models import Org
 from apps.api.modules.policy.constants import MAX_UPLOAD_SIZE_BYTES
 
 STATUSES = ("open", "in_review", "resolved")
@@ -35,7 +35,6 @@ def resolve_notification_recipients(org: Org) -> list[str]:
 
 def create_escalation(
     org: Org,
-    user: User,
     category: str,
     description: str,
     related_tool_request_id: str | None = None,
@@ -43,6 +42,11 @@ def create_escalation(
     attachment_filename: str | None = None,
     attachment_bytes: bytes | None = None,
 ) -> Escalation:
+    """No `user`/reporter parameter, deliberately - anonymity is the point
+    of this feature (see escalations/models.py's docstring). The router
+    still requires the caller to be authenticated (escalations.create),
+    but that identity is never passed in here, so it's never persisted,
+    logged, or emailed anywhere downstream."""
     if category not in CATEGORIES:
         raise EscalationValidationError(f"Unknown category: {category!r}")
     if not description.strip():
@@ -58,7 +62,6 @@ def create_escalation(
     with org_scoped_session(str(org.id)) as db:
         escalation = Escalation(
             org_id=org.id,
-            reporter_id=user.id,
             category=category,
             description=description.strip(),
             related_tool_request_id=uuid.UUID(related_tool_request_id) if related_tool_request_id else None,
@@ -87,11 +90,16 @@ def create_escalation(
         return target
 
 
-def list_escalations(org: Org, *, mine: User | None = None) -> list[Escalation]:
+def list_escalations(org: Org, *, resolved: bool | None = None) -> list[Escalation]:
+    """No per-reporter `mine` filter - there is no reporter to filter by.
+    `resolved` splits the two visible-to-everyone sections the frontend
+    shows: Current Escalations (open/in_review) and Resolved Escalations."""
     with org_scoped_session(str(org.id)) as db:
         query = select(Escalation).where(Escalation.org_id == org.id)
-        if mine is not None:
-            query = query.where(Escalation.reporter_id == mine.id)
+        if resolved is True:
+            query = query.where(Escalation.status == "resolved")
+        elif resolved is False:
+            query = query.where(Escalation.status != "resolved")
         escalations = db.scalars(query.order_by(Escalation.created_at.desc())).all()
         for escalation in escalations:
             db.expunge(escalation)

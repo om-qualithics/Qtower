@@ -16,6 +16,8 @@ import {
   type PolicyListItem,
 } from "@/lib/api";
 
+const HISTORY_LIMIT = 2;
+
 function canManage(user: CurrentUser | null): boolean {
   if (!user) return false;
   return (
@@ -26,6 +28,24 @@ function canManage(user: CurrentUser | null): boolean {
 function canApprove(user: CurrentUser | null): boolean {
   if (!user) return false;
   return user.business_role === "govern" || ["admin", "super_admin"].includes(user.system_role);
+}
+
+function AuthorApprovalTags({ policy }: { policy: PolicyListItem }) {
+  if (!policy.created_by_email && !policy.approved_by_email) return null;
+  return (
+    <div className="mt-1.5 flex flex-wrap gap-1.5">
+      {policy.created_by_email && (
+        <span className="rounded-md border border-border px-2 py-0.5 text-xs text-muted-foreground">
+          Authored by {policy.created_by_email}
+        </span>
+      )}
+      {policy.approved_by_email && (
+        <span className="rounded-md border border-border px-2 py-0.5 text-xs text-muted-foreground">
+          Approved by {policy.approved_by_email}
+        </span>
+      )}
+    </div>
+  );
 }
 
 export default function PolicyListPage() {
@@ -100,12 +120,14 @@ export default function PolicyListPage() {
 
   const active = policies.find((p) => p.status === "active") ?? null;
   const drafts = policies.filter((p) => p.status === "draft");
-  const archived = policies
+  const archivedAll = policies
     .filter((p) => p.status === "archived")
     .sort((a, b) => b.version - a.version);
+  const archived = archivedAll.slice(0, HISTORY_LIMIT);
+  const hiddenHistoryCount = archivedAll.length - archived.length;
 
   return (
-    <div className="mx-auto max-w-3xl">
+    <div className="mx-auto w-[clamp(28rem,26rem+21vw,64rem)] max-w-full">
       <div className="mb-6 flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-semibold">AI Policy</h1>
@@ -142,7 +164,7 @@ export default function PolicyListPage() {
         </div>
       )}
 
-      <section className="mb-8">
+      <section className="mb-6">
         <h2 className="mb-3 text-sm font-semibold text-muted-foreground">Active Policy</h2>
         {active ? (
           <div className="flex items-center justify-between rounded-2xl border border-border bg-card p-4">
@@ -157,13 +179,14 @@ export default function PolicyListPage() {
               <p className="mt-1 text-xs text-muted-foreground">
                 {active.approved_at ? `Approved ${new Date(active.approved_at).toLocaleDateString()}` : ""}
               </p>
+              <AuthorApprovalTags policy={active} />
             </div>
             <Button variant="outline" size="sm" onClick={() => download(active.id)}>
               <Download /> Download
             </Button>
           </div>
         ) : (
-          <div className="rounded-2xl border border-dashed border-border p-10 text-center">
+          <div className="rounded-2xl border border-dashed border-border p-8 text-center">
             <FileText className="mx-auto mb-3 size-8 text-muted-foreground" />
             <p className="text-sm text-muted-foreground">
               No AI policy has been approved yet.
@@ -174,7 +197,7 @@ export default function PolicyListPage() {
       </section>
 
       {canManage(user) && drafts.length > 0 && (
-        <section className="mb-8">
+        <section className="mb-6">
           <h2 className="mb-3 text-sm font-semibold text-muted-foreground">Drafts</h2>
           <div className="space-y-3">
             {drafts.map((policy) => (
@@ -194,6 +217,7 @@ export default function PolicyListPage() {
                   <p className="mt-1 text-xs text-muted-foreground">
                     Last updated {new Date(policy.updated_at).toLocaleDateString()}
                   </p>
+                  <AuthorApprovalTags policy={policy} />
                 </div>
                 <div className="flex gap-2">
                   {policy.source === "builder" && !policy.has_document && (
@@ -239,12 +263,18 @@ export default function PolicyListPage() {
                   <p className="mt-1 text-xs text-muted-foreground">
                     {policy.approved_at ? `Was approved ${new Date(policy.approved_at).toLocaleDateString()}` : ""}
                   </p>
+                  <AuthorApprovalTags policy={policy} />
                 </div>
                 <Button variant="outline" size="sm" onClick={() => download(policy.id)}>
                   <Download /> Download
                 </Button>
               </div>
             ))}
+            {hiddenHistoryCount > 0 && (
+              <p className="text-xs text-muted-foreground">
+                {hiddenHistoryCount} earlier version{hiddenHistoryCount > 1 ? "s" : ""} not shown.
+              </p>
+            )}
           </div>
         )}
       </section>

@@ -9,6 +9,7 @@ from sqlalchemy.exc import DataError
 from apps.api.core import storage
 from apps.api.core.settings import settings
 from apps.api.modules.branding.router import router as branding_router
+from apps.api.modules.codescan.router import router as codescan_router
 from apps.api.modules.dashboard.router import router as dashboard_router
 from apps.api.modules.escalations.router import router as escalations_router
 from apps.api.modules.identity.router import router as identity_router
@@ -92,6 +93,7 @@ app.include_router(tools_router)
 app.include_router(escalations_router)
 app.include_router(training_router)
 app.include_router(dashboard_router)
+app.include_router(codescan_router)
 
 
 @app.get("/health")

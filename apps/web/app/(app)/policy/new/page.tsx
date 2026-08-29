@@ -2,11 +2,13 @@
 
 import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ArrowLeft, ArrowRight, CheckCircle2 } from "lucide-react";
+import { ArrowLeft, ArrowRight, CheckCircle2, ChevronLeft } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { PolicyInfoPanel } from "@/components/policy/info-panel";
 import { PolicyProgressBar } from "@/components/policy/progress-bar";
 import { QuestionChecklist } from "@/components/policy/question-checklist";
+import { QuestionCompactTable } from "@/components/policy/question-compact-table";
 import { QuestionSingleSelect } from "@/components/policy/question-single-select";
 import { QuestionTable } from "@/components/policy/question-table";
 import { QuestionText } from "@/components/policy/question-text";
@@ -15,12 +17,18 @@ import {
   generatePolicy,
   getPolicy,
   getPolicyDownloadUrl,
+  isQuestionAnswered,
   savePolicyStep,
   PolicyGenerateValidationError,
   type AnswerValue,
   type Answers,
   type PolicyStep,
 } from "@/lib/api";
+
+// The two table questions the user wants rendered as a real compact table
+// (header row + trash icon) instead of question-table.tsx's card-per-row
+// layout, which stays the default for every other table question.
+const COMPACT_TABLE_KEYS = new Set(["q5_1_human_oversight", "q6_2_severity"]);
 
 function PolicyWizard() {
   const router = useRouter();
@@ -35,6 +43,7 @@ function PolicyWizard() {
   const [missingRequired, setMissingRequired] = useState<string[]>([]);
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [panelCollapsed, setPanelCollapsed] = useState(false);
 
   useEffect(() => {
     if (!policyId) return;
@@ -54,6 +63,11 @@ function PolicyWizard() {
 
   const step = steps.find((s) => s.id === currentStep) ?? steps[0];
   const isLastStep = currentStep === steps.length;
+
+  // Required questions on the CURRENT step that aren't answered yet - the
+  // user asked that this block moving forward, not just be caught at final
+  // "Generate Policy" time like before.
+  const stepMissing = step.questions.filter((q) => q.required && !isQuestionAnswered(q, answers[q.key]));
 
   const updateAnswer = (key: string, value: AnswerValue) => {
     setAnswers((prev) => (prev ? { ...prev, [key]: value } : prev));
@@ -78,8 +92,12 @@ function PolicyWizard() {
   };
 
   const goNext = async () => {
-    setMissingRequired([]);
     setError(null);
+    if (stepMissing.length > 0) {
+      setMissingRequired(stepMissing.map((q) => q.category ?? q.label));
+      return;
+    }
+    setMissingRequired([]);
     try {
       if (isLastStep) {
         await saveCurrentStep(currentStep);
@@ -108,6 +126,7 @@ function PolicyWizard() {
 
   const goBack = async () => {
     setError(null);
+    setMissingRequired([]);
     try {
       const resumeStep = Math.max(1, currentStep - 1);
       await saveCurrentStep(resumeStep);
@@ -137,82 +156,129 @@ function PolicyWizard() {
   }
 
   return (
-    <div className="mx-auto max-w-2xl">
-      <h1 className="mb-1 text-2xl font-semibold">Build your AI Policy</h1>
-      <p className="mb-6 text-sm text-muted-foreground">
-        Answer the questions below - your answers plug directly into the policy document.
-      </p>
+    // w-fit (not w-full) is deliberate: this content block - header +
+    // the card/panel row below - should size to its own content and then
+    // center as one unit via mx-auto, matching every other page in this
+    // app (/policy, /tools, /dashboard all use `mx-auto max-w-*`). w-full
+    // was the bug the user caught - it stretched this container to fill
+    // the whole main area regardless of content width, so flex-1 on the
+    // left column then grew to fill that leftover space while the card
+    // inside stayed capped by its own clamp(), leaving a dead gap between
+    // the card and the panel. With w-fit, the outer box's width comes
+    // from its widest child (the row), so the header above lines up with
+    // the row's left edge instead of independently spanning full-width.
+    <div className="mx-auto w-fit max-w-full">
+      <div className="w-full max-w-[clamp(32rem,28rem+17vw,56rem)]">
+        <button
+          type="button"
+          onClick={() => router.push("/policy")}
+          className="mb-2 flex items-center gap-1 text-sm text-muted-foreground transition hover:text-foreground"
+        >
+          <ChevronLeft className="size-4" /> Back to AI Policy
+        </button>
 
-      <div className="mb-8">
-        <PolicyProgressBar steps={steps} currentStep={currentStep} />
-      </div>
+        <h1 className="mb-1 text-2xl font-semibold">Build your AI Policy</h1>
+        <p className="mb-4 text-sm text-muted-foreground">
+          Answer the questions below - your answers plug directly into the policy document.
+        </p>
 
-      <div className="rounded-2xl border border-border bg-card p-6">
-        <h2 className="mb-4 text-lg font-semibold">{step.title}</h2>
-
-        {error && (
-          <div className="mb-4 rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
-            {error}
-          </div>
-        )}
-
-        {missingRequired.length > 0 && (
-          <div className="mb-4 rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
-            Please complete all required fields before generating the policy.
-          </div>
-        )}
-
-        <div className="space-y-6">
-          {step.questions.map((question) => {
-            const answer = answers[question.key];
-            return (
-              <div key={question.key}>
-                <label className="mb-2 block text-sm font-medium">
-                  {question.category ?? question.label}
-                  {question.required && <span className="ml-1 text-destructive">*</span>}
-                </label>
-                {question.type === "checklist" && (
-                  <QuestionChecklist
-                    question={question}
-                    answer={answer as never}
-                    onChange={(next) => updateAnswer(question.key, next)}
-                  />
-                )}
-                {question.type === "single_select" && (
-                  <QuestionSingleSelect
-                    question={question}
-                    answer={answer as never}
-                    onChange={(next) => updateAnswer(question.key, next)}
-                  />
-                )}
-                {question.type === "text" && (
-                  <QuestionText
-                    question={question}
-                    answer={answer as never}
-                    onChange={(next) => updateAnswer(question.key, next)}
-                  />
-                )}
-                {question.type === "table" && (
-                  <QuestionTable
-                    question={question}
-                    answer={answer as never}
-                    onChange={(next) => updateAnswer(question.key, next)}
-                  />
-                )}
-              </div>
-            );
-          })}
+        <div className="mb-6">
+          <PolicyProgressBar
+            steps={steps}
+            currentStep={currentStep}
+            onPrev={goBack}
+            onNext={goNext}
+            nextDisabled={stepMissing.length > 0 || saving || generating}
+          />
         </div>
       </div>
 
-      <div className="mt-6 flex justify-between">
-        <Button variant="outline" onClick={goBack} disabled={currentStep === 1 || saving || generating}>
-          <ArrowLeft /> Back
-        </Button>
-        <Button onClick={goNext} disabled={saving || generating}>
-          {isLastStep ? (generating ? "Generating..." : "Generate Policy") : "Next"}
-          {!isLastStep && <ArrowRight />}
-        </Button>
+      <div className="flex items-start gap-6">
+        <div className="min-w-0">
+          <div className="w-full max-w-[clamp(32rem,28rem+17vw,56rem)]">
+            <div className="rounded-2xl border border-border bg-card p-5">
+              <h2 className="mb-3 text-lg font-semibold">{step.title}</h2>
+
+              {error && (
+                <div className="mb-3 rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
+                  {error}
+                </div>
+              )}
+
+              {missingRequired.length > 0 && (
+                <div className="mb-3 rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
+                  Please complete the following required field{missingRequired.length > 1 ? "s" : ""} before
+                  continuing: {missingRequired.join(", ")}
+                </div>
+              )}
+
+              <div className="space-y-5">
+                {step.questions.map((question) => {
+                  const answer = answers[question.key];
+                  return (
+                    <div key={question.key}>
+                      <label className="mb-1.5 block text-sm font-medium">
+                        {question.category ?? question.label}
+                        {question.required && <span className="ml-1 text-destructive">*</span>}
+                      </label>
+                      {question.type === "checklist" && (
+                        <QuestionChecklist
+                          question={question}
+                          answer={answer as never}
+                          onChange={(next) => updateAnswer(question.key, next)}
+                        />
+                      )}
+                      {question.type === "single_select" && (
+                        <QuestionSingleSelect
+                          question={question}
+                          answer={answer as never}
+                          onChange={(next) => updateAnswer(question.key, next)}
+                        />
+                      )}
+                      {question.type === "text" && (
+                        <QuestionText
+                          question={question}
+                          answer={answer as never}
+                          onChange={(next) => updateAnswer(question.key, next)}
+                        />
+                      )}
+                      {question.type === "table" &&
+                        (COMPACT_TABLE_KEYS.has(question.key) ? (
+                          <QuestionCompactTable
+                            question={question}
+                            answer={answer as never}
+                            onChange={(next) => updateAnswer(question.key, next)}
+                          />
+                        ) : (
+                          <QuestionTable
+                            question={question}
+                            answer={answer as never}
+                            onChange={(next) => updateAnswer(question.key, next)}
+                          />
+                        ))}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="mt-5 flex justify-between">
+              <Button variant="outline" onClick={goBack} disabled={currentStep === 1 || saving || generating}>
+                <ArrowLeft /> Back
+              </Button>
+              <Button onClick={goNext} disabled={saving || generating || stepMissing.length > 0}>
+                {isLastStep ? (generating ? "Generating..." : "Generate Policy") : "Next"}
+                {!isLastStep && <ArrowRight />}
+              </Button>
+            </div>
+          </div>
+        </div>
+
+        <PolicyInfoPanel
+          stepId={currentStep}
+          collapsed={panelCollapsed}
+          onToggleCollapsed={() => setPanelCollapsed((c) => !c)}
+        />
       </div>
     </div>
   );

@@ -20,6 +20,17 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379/0"
 
     minio_endpoint: str = "http://localhost:9000"
+    # Only used for *presigned* URLs (policy downloads, escalation
+    # attachments, codescan reports) - those get handed to the browser,
+    # which is outside the docker network and can't resolve an internal
+    # service hostname like "minio". Blank (the default, native dev where
+    # there's no such split) falls back to minio_endpoint. When the
+    # api/worker run containerized (see infra/docker-compose.yml's
+    # `codescan` profile), MINIO_ENDPOINT is the internal `http://minio:9000`
+    # for the container's own upload/download calls, while this is set to
+    # `http://localhost:9000` (reachable via the exposed port mapping) so
+    # generated download links actually work in the browser.
+    minio_public_endpoint: str = ""
     minio_root_user: str = "misty-admin"
     minio_root_password: str = "changeme-too"
     minio_bucket: str = "misty"
@@ -50,11 +61,27 @@ class Settings(BaseSettings):
     # by default = this login path is disabled outright, not a silent
     # blank-password backdoor. Set via apps/api/scripts/set_super_admin_password.py,
     # never plaintext.
+    #
+    # Stored base64-encoded (like license_public_key below), NOT as the
+    # raw bcrypt hash string - a bcrypt hash always contains literal `$`
+    # characters (its own format is `$2b$12$salt+hash`), and Docker
+    # Compose's env_file loading interpolates `$word` sequences as
+    # `${word}` variable references, silently corrupting the value when
+    # it's passed into a container this way (confirmed: this broke
+    # super-admin login the first time the api/worker services were
+    # containerized, Milestone 13). Base64 has no `$` characters, so it
+    # survives that interpolation pass untouched either way.
     super_admin_email: str = ""
-    super_admin_password_hash: str = ""
+    super_admin_password_hash_b64: str = ""
 
     license_public_key: str = ""
     license_token: str = ""
+
+    # Fernet key (core/crypto.py) - encrypts secrets at rest, currently
+    # only a GitHub App's private key (modules/codescan). Generate via
+    # infra/scripts/gen-encryption-key.sh. Blank = encrypt/decrypt_secret
+    # raise instead of silently no-op'ing.
+    encryption_key: str = ""
 
     # "mock" (default, no real SMTP call - logs to notification_log only) or
     # "live" (sends via smtplib once smtp_host/smtp_from_address are set).
@@ -71,6 +98,12 @@ class Settings(BaseSettings):
         if not self.license_public_key:
             return ""
         return base64.b64decode(self.license_public_key).decode()
+
+    @property
+    def super_admin_password_hash(self) -> str:
+        if not self.super_admin_password_hash_b64:
+            return ""
+        return base64.b64decode(self.super_admin_password_hash_b64).decode()
 
 
 settings = Settings()

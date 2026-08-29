@@ -22,6 +22,7 @@ EscalationCategory = PgEnum(
     "policy_violation",
     "unapproved_tool_use",
     "data_exposure_concern",
+    "code_scan_critical",
     "other",
     name="escalation_category",
     create_type=False,
@@ -31,17 +32,18 @@ EscalationStatus = PgEnum("open", "in_review", "resolved", name="escalation_stat
 
 class Escalation(Base):
     """Free-text issue report (handoff §5e) - any authenticated user can
-    raise one, govern/assure triage it. related_tool_request_id/
-    related_policy_id are nullable optional links; the UI for choosing
-    what to link is deferred (see plan) - the columns exist for a future
-    picker to fill in."""
+    raise one, govern/assure triage it. Deliberately anonymous: there is no
+    reporter_id column and never has been one written after migration
+    0013 - nobody, not even an admin, can trace an alert back to who
+    raised it. related_tool_request_id/related_policy_id are nullable
+    optional links; the UI for choosing what to link is deferred (see
+    plan) - the columns exist for a future picker to fill in."""
 
     __tablename__ = "escalation"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     org_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("org.id"), nullable=False)
 
-    reporter_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("user.id"), nullable=False)
     category: Mapped[str] = mapped_column(EscalationCategory, nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False)
 

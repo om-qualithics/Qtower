@@ -212,6 +212,8 @@ export type Policy = {
   approver_name: string | null;
   answers: Answers;
   created_by: string | null;
+  created_by_email: string | null;
+  approved_by_email: string | null;
   generated_at: string | null;
   approved_at: string | null;
   created_at: string;
@@ -219,6 +221,28 @@ export type Policy = {
 };
 
 export type PolicyListItem = Omit<Policy, "answers" | "approver_name">;
+
+/** Mirrors apps/api/modules/policy/service.py::_is_answered exactly - used
+ * client-side to block advancing the wizard past a step with unanswered
+ * required questions, instead of only catching it server-side at final
+ * generate() time. */
+export function isQuestionAnswered(question: Question, answer: AnswerValue | undefined): boolean {
+  if (!answer) return false;
+  if (question.type === "checklist") {
+    const a = answer as ChecklistAnswer;
+    return a.selected.length > 0 || a.other.length > 0;
+  }
+  if (question.type === "table") {
+    return (answer as TableAnswer).rows.length > 0;
+  }
+  if (question.type === "single_select") {
+    return Boolean((answer as SingleSelectAnswer).selected);
+  }
+  if (question.type === "text") {
+    return Boolean((answer as TextAnswer).value.trim());
+  }
+  return false;
+}
 
 export class PolicyGenerateValidationError extends Error {
   missingRequired: string[];
@@ -462,6 +486,9 @@ export async function rejectToolRequest(id: string, reason?: string): Promise<To
 export type EscalationCategory = "policy_violation" | "unapproved_tool_use" | "data_exposure_concern" | "other";
 export type EscalationStatus = "open" | "in_review" | "resolved";
 
+// No reporter_id/reporter_email - Raise Alert is anonymous, the backend
+// never stores or returns who raised an escalation (see the API's
+// escalations/models.py docstring).
 export type Escalation = {
   id: string;
   category: EscalationCategory;
@@ -469,8 +496,6 @@ export type Escalation = {
   related_tool_request_id: string | null;
   related_policy_id: string | null;
   status: EscalationStatus;
-  reporter_id: string;
-  reporter_email: string | null;
   assigned_to: string | null;
   resolution_note: string | null;
   has_attachment: boolean;
@@ -509,8 +534,8 @@ export async function getEscalationAttachmentUrl(id: string): Promise<string> {
   return body.download_url;
 }
 
-export async function fetchEscalations(options: { mine?: boolean } = {}): Promise<Escalation[]> {
-  const params = options.mine ? "?mine=true" : "";
+export async function fetchEscalations(options: { resolved?: boolean } = {}): Promise<Escalation[]> {
+  const params = options.resolved === undefined ? "" : `?resolved=${options.resolved}`;
   const res = await fetch(`${API_BASE_URL}/escalations/${params}`, { credentials: "include" });
   await throwIfNotOk(res, "Failed to fetch escalations");
   return res.json();
@@ -644,15 +669,129 @@ export type DashboardSummary = {
   pending_alerts: Escalation[];
   my_policy_drafts: PolicyListItem[];
   my_tool_requests: ToolRequest[];
-  my_alerts: Escalation[];
+  // No my_alerts - escalations are anonymous, there's no "mine" to report.
   my_training: TrainingModule[];
   training_summary: TrainingSummary | null;
   tool_request_counts: Record<string, number>;
   escalation_counts: Record<string, number>;
+
+  my_recent_scans: ScanRun[];
+  scan_finding_counts: Record<string, number>;
 };
 
 export async function fetchDashboardSummary(): Promise<DashboardSummary> {
   const res = await fetch(`${API_BASE_URL}/dashboard/summary`, { credentials: "include" });
   await throwIfNotOk(res, "Failed to fetch dashboard summary");
   return res.json();
+}
+
+// --- Code Scan ---
+
+export type GithubConnectionStatus = {
+  configured: boolean;
+  account_login: string | null;
+  app_slug: string | null;
+  created_at: string | null;
+};
+
+export async function fetchGithubConnectionStatus(): Promise<GithubConnectionStatus> {
+  const res = await fetch(`${API_BASE_URL}/codescan/github/connection`, { credentials: "include" });
+  await throwIfNotOk(res, "Failed to fetch GitHub connection status");
+  return res.json();
+}
+
+export async function createGithubConnection(fields: {
+  appId: string;
+  privateKey: string;
+  installationId: string;
+}): Promise<GithubConnectionStatus> {
+  const res = await fetch(`${API_BASE_URL}/codescan/github/connection`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ app_id: fields.appId, private_key: fields.privateKey, installation_id: fields.installationId }),
+  });
+  if (res.status === 400) {
+    const body = await res.json();
+    throw new Error(body.detail ?? "Failed to save GitHub connection");
+  }
+  await throwIfNotOk(res, "Failed to save GitHub connection");
+  return res.json();
+}
+
+export type Repo = { full_name: string; default_branch: string; private: boolean };
+
+export async function fetchGithubRepos(): Promise<Repo[]> {
+  const res = await fetch(`${API_BASE_URL}/codescan/github/repos`, { credentials: "include" });
+  if (res.status === 400) {
+    const body = await res.json();
+    throw new Error(body.detail ?? "Failed to list repositories");
+  }
+  await throwIfNotOk(res, "Failed to list repositories");
+  return res.json();
+}
+
+export type ScanStatus = "queued" | "running" | "complete" | "failed";
+
+export type ScanRun = {
+  id: string;
+  repo_full_name: string;
+  commit_sha: string | null;
+  status: ScanStatus;
+  triggered_by: string;
+  triggered_by_email: string | null;
+  error_message: string | null;
+  finding_counts: Record<string, number>;
+  started_at: string | null;
+  completed_at: string | null;
+  created_at: string;
+};
+
+export type Finding = {
+  id: string;
+  category: string;
+  category_label: string;
+  severity: "critical" | "high" | "medium" | "low";
+  file_path: string;
+  line_start: number | null;
+  line_end: number | null;
+  description: string;
+  sources: string[];
+  confidence: string;
+};
+
+export type ScanDetail = ScanRun & { findings: Finding[] };
+
+export async function createScan(repoFullName: string): Promise<ScanRun> {
+  const res = await fetch(`${API_BASE_URL}/codescan/scans`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ repo_full_name: repoFullName }),
+  });
+  if (res.status === 400) {
+    const body = await res.json();
+    throw new Error(body.detail ?? "Failed to start scan");
+  }
+  await throwIfNotOk(res, "Failed to start scan");
+  return res.json();
+}
+
+export async function fetchScans(mine = false): Promise<ScanRun[]> {
+  const res = await fetch(`${API_BASE_URL}/codescan/scans?mine=${mine}`, { credentials: "include" });
+  await throwIfNotOk(res, "Failed to fetch scans");
+  return res.json();
+}
+
+export async function fetchScanDetail(id: string): Promise<ScanDetail> {
+  const res = await fetch(`${API_BASE_URL}/codescan/scans/${id}`, { credentials: "include" });
+  await throwIfNotOk(res, "Failed to fetch scan detail");
+  return res.json();
+}
+
+export async function fetchScanReportUrl(id: string): Promise<string> {
+  const res = await fetch(`${API_BASE_URL}/codescan/scans/${id}/report`, { credentials: "include" });
+  await throwIfNotOk(res, "Failed to get report link");
+  const body = await res.json();
+  return body.download_url;
 }

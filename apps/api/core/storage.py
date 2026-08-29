@@ -13,6 +13,18 @@ _client = boto3.client(
     region_name="us-east-1",
 )
 
+# Separate client, same credentials, only used to *sign* presigned URLs -
+# see settings.minio_public_endpoint's docstring for why this needs to be
+# a different host than the one the api/worker actually connect through.
+_presign_client = boto3.client(
+    "s3",
+    endpoint_url=settings.minio_public_endpoint or settings.minio_endpoint,
+    aws_access_key_id=settings.minio_root_user,
+    aws_secret_access_key=settings.minio_root_password,
+    config=Config(signature_version="s3v4"),
+    region_name="us-east-1",
+)
+
 
 def ensure_bucket() -> None:
     """Idempotent create-if-missing, called once from the FastAPI lifespan
@@ -35,8 +47,10 @@ def download_bytes(key: str) -> bytes:
 
 def presigned_url(key: str, expires_seconds: int = 300) -> str:
     """Lets the frontend download directly from MinIO/S3 rather than
-    proxying large files through the API."""
-    return _client.generate_presigned_url(
+    proxying large files through the API. Signed against
+    minio_public_endpoint (falls back to minio_endpoint) - see
+    _presign_client above."""
+    return _presign_client.generate_presigned_url(
         "get_object",
         Params={"Bucket": settings.minio_bucket, "Key": key},
         ExpiresIn=expires_seconds,

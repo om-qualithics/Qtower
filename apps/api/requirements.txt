@@ -10,7 +10,26 @@ redis==5.2.1  # also used directly by core/rate_limit.py, not just as celery's b
 boto3==1.35.90
 httpx==0.28.1
 pyjwt[crypto]==2.10.1
-litellm==1.56.4
+# 1.83.0 (was 1.56.4) - the fixed version for CVE-2026-35030 (GHSA-jjhc-v7c2-5hh6,
+# Trivy-flagged in a real Code Scan of this repo): an OIDC-userinfo auth-bypass
+# in LiteLLM's proxy server, reachable only with enable_jwt_auth: true, which
+# this app never sets (litellm is used here purely as a library via
+# ai_gateway/providers/litellm_provider.py, never as the standalone proxy) -
+# so the practical exposure was ~zero, but the vulnerable code was still
+# shipping in the installed package, so upgraded rather than left as an
+# accepted risk. 1.83.0 is the earliest patched release (no backport to the
+# 1.56.x/1.7x lines exists) and drops the httpx<0.28.0 constraint 1.56.4 had
+# (1.83.0 only requires httpx>=0.23.0) - the old httpx pin/comment above is
+# gone because that workaround is no longer needed. Full test suite (103
+# tests) re-verified green against 1.83.0 before pinning.
+litellm==1.83.0
 docxtpl==0.19.0
 python-multipart==0.0.20
 bcrypt==4.2.1
+
+# --- Milestone 13: AI Code Scan ---
+setuptools<81  # semgrep's opentelemetry tracing dep still imports pkg_resources, removed from setuptools 81+
+semgrep==1.99.0
+bandit==1.8.0
+Jinja2==3.1.5  # already a transitive dep of docxtpl - pinned directly now that codescan/report.py uses it itself
+weasyprint==63.1  # HTML+CSS -> PDF for the scan report; needs system libs, see infra/Dockerfile.api

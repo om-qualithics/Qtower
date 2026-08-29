@@ -30,6 +30,8 @@ function canApproveTools(user: CurrentUser | null): boolean {
 
 const ESCALATION_STATUS_LABELS: Record<string, string> = { open: "Open", in_review: "In review", resolved: "Resolved" };
 const TOOL_REQUEST_STATUS_LABELS: Record<string, string> = { pending: "Pending", approved: "Approved", rejected: "Rejected" };
+const SEVERITY_LABELS: Record<string, string> = { critical: "Critical", high: "High", medium: "Medium", low: "Low" };
+const SCAN_STATUS_LABELS: Record<string, string> = { queued: "Queued", running: "Running", complete: "Complete", failed: "Failed" };
 
 function isOperator(user: CurrentUser | null): boolean {
   return !!user && user.business_role === "operator";
@@ -161,7 +163,7 @@ export default function DashboardPage() {
       {showPendingApproval && summary?.training_summary && (
         <section className="mt-8">
           <h2 className="mb-3 text-sm font-semibold text-muted-foreground">Overview</h2>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <div className="rounded-2xl border border-border bg-card p-4">
               <p className="mb-3 text-xs font-medium text-muted-foreground">Tool Requests</p>
               <CountBars counts={summary.tool_request_counts} labels={TOOL_REQUEST_STATUS_LABELS} />
@@ -169,6 +171,10 @@ export default function DashboardPage() {
             <div className="rounded-2xl border border-border bg-card p-4">
               <p className="mb-3 text-xs font-medium text-muted-foreground">Escalations</p>
               <CountBars counts={summary.escalation_counts} labels={ESCALATION_STATUS_LABELS} />
+            </div>
+            <div className="rounded-2xl border border-border bg-card p-4">
+              <p className="mb-3 text-xs font-medium text-muted-foreground">Code Scan Findings</p>
+              <CountBars counts={summary.scan_finding_counts} labels={SEVERITY_LABELS} />
             </div>
             <div className="rounded-2xl border border-border bg-card p-4">
               <p className="mb-1 text-xs font-medium text-muted-foreground">Training Completion</p>
@@ -285,20 +291,23 @@ export default function DashboardPage() {
         </section>
       )}
 
-      {summary && summary.my_alerts.length > 0 && (
+      {/* No "Your Alerts" section - escalations are anonymous, there is no
+          per-user list to show back (see lib/api.ts's Escalation type).
+          Current/Resolved Escalations live on /escalations, visible to
+          everyone there, not attributed to anyone here. */}
+
+      {summary && summary.my_recent_scans.length > 0 && (
         <section className="mt-8">
-          <h2 className="mb-3 text-sm font-semibold text-muted-foreground">Your Alerts</h2>
+          <h2 className="mb-3 text-sm font-semibold text-muted-foreground">Your Recent Scans</h2>
           <div className="space-y-2">
-            {summary.my_alerts.map((alert) => (
+            {summary.my_recent_scans.map((scan) => (
               <Link
-                key={alert.id}
-                href="/escalations"
-                className="block rounded-xl border border-border bg-card p-3 text-sm hover:bg-muted"
+                key={scan.id}
+                href="/codescan"
+                className="flex items-center justify-between rounded-xl border border-border bg-card p-3 text-sm hover:bg-muted"
               >
-                <span className="font-medium">{ESCALATION_STATUS_LABELS[alert.status]}</span> — {alert.description}
-                {alert.status === "resolved" && alert.resolution_note && (
-                  <p className="mt-1 text-xs text-muted-foreground">Resolution: {alert.resolution_note}</p>
-                )}
+                <span className="truncate pr-2 font-medium">{scan.repo_full_name}</span>
+                <span className="shrink-0 text-xs text-muted-foreground">{SCAN_STATUS_LABELS[scan.status]}</span>
               </Link>
             ))}
           </div>

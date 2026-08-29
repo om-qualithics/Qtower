@@ -104,3 +104,75 @@ services:
       PRIVATE_KEY: ${MOCK_SAML_PRIVATE_KEY:?run infra/scripts/gen-mock-saml-cert.sh first}
     ports:
       - "${MOCK_SAML_PORT:-4000}:4000"
+
+  # api and worker below run the SAME image (Dockerfile.api) that a real
+  # deployment uses - built once here so codescan's scanner tools
+  # (git/Semgrep/Bandit/Gitleaks/Trivy) and weasyprint's native libs are
+  # actually available. This mirrors production: one always-on api
+  # container and one always-on worker container, not a container spun up
+  # per scan (see aboutproject.md Milestone 13 for why). The frontend
+  # (`pnpm dev`) keeps running natively for fast iteration - only the
+  # api/worker move into Docker, since those are what codescan actually
+  # needs Linux tooling for. `docker compose up -d` will NOT start these
+  # by default (see the `codescan` profile below) - opt in explicitly with
+  # `docker compose --profile codescan up -d api worker` when you need
+  # real scans to complete; the native uvicorn/celery workflow documented
+  # in CLAUDE.md still works for everything else.
+  api:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.api
+    restart: unless-stopped
+    profiles: ["codescan"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      minio:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      # Override the localhost-oriented values from .env (meant for the
+      # native dev processes) with this compose network's service names.
+      # API_PUBLIC_URL/WEB_PUBLIC_URL stay as localhost - those are URLs
+      # handed to the *browser*, which is outside the docker network.
+      DATABASE_URL: postgresql+psycopg://${APP_DB_USER:-misty_app}:${APP_DB_PASSWORD}@postgres:5432/${POSTGRES_DB:-misty}
+      REDIS_URL: redis://redis:6379/0
+      MINIO_ENDPOINT: http://minio:9000
+      # Browser-reachable (via the exposed port mapping below), unlike
+      # MINIO_ENDPOINT above - see settings.minio_public_endpoint's
+      # docstring. Without this, presigned download links (policy docs,
+      # escalation attachments, codescan reports) point at the
+      # container-internal "minio" hostname and 404 in the browser.
+      MINIO_PUBLIC_ENDPOINT: http://localhost:${MINIO_API_PORT:-9000}
+      JACKSON_BASE_URL: http://jackson:5225
+    ports:
+      - "${API_PORT:-8000}:8000"
+
+  worker:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.api
+    restart: unless-stopped
+    profiles: ["codescan"]
+    command: ["celery", "-A", "apps.api.core.celery_app", "worker", "--loglevel=info", "-Q", "celery,codescan"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      minio:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://${APP_DB_USER:-misty_app}:${APP_DB_PASSWORD}@postgres:5432/${POSTGRES_DB:-misty}
+      REDIS_URL: redis://redis:6379/0
+      MINIO_ENDPOINT: http://minio:9000
+      # Browser-reachable (via the exposed port mapping below), unlike
+      # MINIO_ENDPOINT above - see settings.minio_public_endpoint's
+      # docstring. Without this, presigned download links (policy docs,
+      # escalation attachments, codescan reports) point at the
+      # container-internal "minio" hostname and 404 in the browser.
+      MINIO_PUBLIC_ENDPOINT: http://localhost:${MINIO_API_PORT:-9000}
+      JACKSON_BASE_URL: http://jackson:5225

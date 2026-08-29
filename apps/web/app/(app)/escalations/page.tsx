@@ -69,51 +69,40 @@ function AttachmentLink({ alert }: { alert: Escalation }) {
   );
 }
 
+type Tab = "current" | "resolved";
+
 export default function EscalationsPage() {
   const [user, setUser] = useState<CurrentUser | null>(null);
-  const [myAlerts, setMyAlerts] = useState<Escalation[]>([]);
-  const [allAlerts, setAllAlerts] = useState<Escalation[]>([]);
+  const [tab, setTab] = useState<Tab>("current");
+  const [current, setCurrent] = useState<Escalation[]>([]);
+  const [resolved, setResolved] = useState<Escalation[]>([]);
   const [raiseOpen, setRaiseOpen] = useState(false);
   const [respondTarget, setRespondTarget] = useState<Escalation | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const refresh = () => {
-    fetchEscalations({ mine: true })
-      .then(setMyAlerts)
-      .catch(() => setMyAlerts([]));
-  };
+  const refreshCurrent = () => fetchEscalations({ resolved: false }).then(setCurrent).catch(() => setCurrent([]));
+  const refreshResolved = () => fetchEscalations({ resolved: true }).then(setResolved).catch(() => setResolved([]));
 
   useEffect(() => {
-    fetchEscalations({ mine: true })
-      .then(setMyAlerts)
-      .catch(() => setMyAlerts([]));
-    fetchCurrentUser().then((u) => {
-      setUser(u);
-      if (canManage(u)) {
-        fetchEscalations()
-          .then(setAllAlerts)
-          .catch(() => setAllAlerts([]));
-      }
-    });
+    fetchCurrentUser().then(setUser);
+    refreshCurrent();
+    refreshResolved();
   }, []);
 
   const refreshAll = () => {
-    refresh();
-    if (canManage(user)) {
-      fetchEscalations()
-        .then(setAllAlerts)
-        .catch(() => setAllAlerts([]));
-    }
+    refreshCurrent();
+    refreshResolved();
   };
 
   return (
     <div className="mx-auto max-w-3xl">
-      <div className="mb-6 flex items-center justify-between">
+      <div className="mb-4 flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-semibold">Raise Alert</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Report a concern about AI use - it&apos;s routed to your organization&apos;s AI governance team.
+            Report a concern about AI use. Alerts are fully anonymous - no one, including your governance team,
+            can see who raised one.
           </p>
         </div>
         <div className="flex gap-2">
@@ -132,44 +121,37 @@ export default function EscalationsPage() {
         </div>
       )}
 
-      <section className="mb-8">
-        <h2 className="mb-3 text-sm font-semibold text-muted-foreground">My Alerts</h2>
-        {myAlerts.length === 0 ? (
-          <p className="text-sm text-muted-foreground">You haven&apos;t raised any alerts.</p>
-        ) : (
-          <div className="space-y-3">
-            {myAlerts.map((alert) => (
-              <div key={alert.id} className="rounded-2xl border border-border bg-card p-4">
-                <div className="flex items-center gap-2">
-                  <span className="rounded-md bg-muted px-2 py-0.5 text-xs text-muted-foreground">
-                    {CATEGORY_LABELS[alert.category]}
-                  </span>
-                  {statusBadge(alert.status)}
-                </div>
-                <p className="mt-2 text-sm">{alert.description}</p>
-                <AttachmentLink alert={alert} />
-                {alert.resolution_note && (
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    <span className="font-medium text-foreground">Resolution:</span> {alert.resolution_note}
-                  </p>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
-      </section>
+      <div className="mb-6 flex gap-1 border-b border-border">
+        <button
+          type="button"
+          onClick={() => setTab("current")}
+          className={`px-3 py-2 text-sm font-medium transition ${
+            tab === "current" ? "border-b-2 border-primary text-foreground" : "text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          Current Escalations{current.length > 0 ? ` (${current.length})` : ""}
+        </button>
+        <button
+          type="button"
+          onClick={() => setTab("resolved")}
+          className={`px-3 py-2 text-sm font-medium transition ${
+            tab === "resolved" ? "border-b-2 border-primary text-foreground" : "text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          Resolved Escalations{resolved.length > 0 ? ` (${resolved.length})` : ""}
+        </button>
+      </div>
 
-      {canManage(user) && (
+      {tab === "current" && (
         <section>
-          <h2 className="mb-3 text-sm font-semibold text-muted-foreground">All Alerts</h2>
-          {allAlerts.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No alerts raised yet.</p>
+          {current.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No open escalations right now.</p>
           ) : (
             <div className="space-y-3">
-              {allAlerts.map((alert) => (
+              {current.map((alert) => (
                 <div key={alert.id} className="rounded-2xl border border-border bg-card p-4">
                   <div className="flex items-center justify-between">
-                    <div>
+                    <div className="min-w-0">
                       <div className="flex items-center gap-2">
                         <span className="rounded-md bg-muted px-2 py-0.5 text-xs text-muted-foreground">
                           {CATEGORY_LABELS[alert.category]}
@@ -178,43 +160,62 @@ export default function EscalationsPage() {
                       </div>
                       <p className="mt-2 text-sm">{alert.description}</p>
                       <AttachmentLink alert={alert} />
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        Raised by {alert.reporter_email ?? "unknown"}
-                        {alert.assigned_to === user?.id ? " · Assigned to you" : ""}
-                      </p>
-                      {alert.resolution_note && (
-                        <p className="mt-1 text-xs text-muted-foreground">
-                          <span className="font-medium text-foreground">Resolution:</span> {alert.resolution_note}
-                        </p>
-                      )}
                     </div>
-                    <div className="flex shrink-0 items-center gap-2">
-                      {alert.assigned_to !== user?.id && (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          disabled={busy}
-                          onClick={async () => {
-                            setBusy(true);
-                            setError(null);
-                            try {
-                              await updateEscalation(alert.id, { assigned_to: user?.id });
-                              refreshAll();
-                            } catch (err) {
-                              setError(err instanceof Error ? err.message : "Something went wrong.");
-                            } finally {
-                              setBusy(false);
-                            }
-                          }}
-                        >
-                          <UserPlus /> Assign to me
+                    {canManage(user) && (
+                      <div className="flex shrink-0 items-center gap-2">
+                        {alert.assigned_to !== user?.id && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            disabled={busy}
+                            onClick={async () => {
+                              setBusy(true);
+                              setError(null);
+                              try {
+                                await updateEscalation(alert.id, { assigned_to: user?.id });
+                                refreshAll();
+                              } catch (err) {
+                                setError(err instanceof Error ? err.message : "Something went wrong.");
+                              } finally {
+                                setBusy(false);
+                              }
+                            }}
+                          >
+                            <UserPlus /> Assign to me
+                          </Button>
+                        )}
+                        <Button size="sm" onClick={() => setRespondTarget(alert)}>
+                          Respond
                         </Button>
-                      )}
-                      <Button size="sm" onClick={() => setRespondTarget(alert)}>
-                        Respond
-                      </Button>
-                    </div>
+                      </div>
+                    )}
                   </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
+
+      {tab === "resolved" && (
+        <section>
+          {resolved.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No escalations have been resolved yet.</p>
+          ) : (
+            <div className="space-y-3">
+              {resolved.map((alert) => (
+                <div key={alert.id} className="rounded-2xl border border-border bg-card p-4">
+                  <div className="flex items-center gap-2">
+                    <span className="rounded-md bg-muted px-2 py-0.5 text-xs text-muted-foreground">
+                      {CATEGORY_LABELS[alert.category]}
+                    </span>
+                    {statusBadge(alert.status)}
+                  </div>
+                  <p className="mt-2 text-sm">{alert.description}</p>
+                  <AttachmentLink alert={alert} />
+                  <p className="mt-2 rounded-lg bg-muted/60 p-2.5 text-sm">
+                    <span className="font-medium text-foreground">Resolution:</span> {alert.resolution_note}
+                  </p>
                 </div>
               ))}
             </div>
@@ -268,7 +269,7 @@ function RaiseAlertDialog({
             <AlertTriangle className="size-4 text-destructive" /> Raise an Alert
           </DialogTitle>
           <DialogDescription>
-            Describe your concern - it goes straight to your organization&apos;s AI governance team.
+            Describe your concern - it&apos;s completely anonymous. Nothing here is linked back to your account.
           </DialogDescription>
         </DialogHeader>
 
@@ -294,6 +295,9 @@ function RaiseAlertDialog({
               onChange={(e) => setFile(e.target.files?.[0] ?? null)}
               className="block w-full text-sm text-muted-foreground file:mr-3 file:rounded-lg file:border file:border-border file:bg-background file:px-2.5 file:py-1 file:text-sm file:font-medium file:text-foreground hover:file:bg-muted"
             />
+            <p className="mt-1 text-xs text-muted-foreground">
+              Avoid attaching anything that could identify you (e.g. a file named after you).
+            </p>
           </div>
         </div>
 
@@ -379,7 +383,7 @@ function RespondDialog({
             </div>
             <div>
               <Label className="mb-1.5 block text-xs">
-                Note{status === "resolved" ? " (required — how was this addressed?)" : " (optional)"}
+                Note{status === "resolved" ? " (required — visible to everyone once resolved)" : " (optional)"}
               </Label>
               <Textarea value={note} onChange={(e) => setNote(e.target.value)} rows={3} />
             </div>

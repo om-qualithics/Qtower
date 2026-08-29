@@ -59,7 +59,7 @@ def test_get_summary_role_gating() -> None:
         govern = _make_user(org, "govern@example.com", "govern")
 
         tools_service.create_request(org, operator, "tool", "Some Tool", "https://example.com", "use case")
-        escalations_service.create_escalation(org, operator, "other", "Something felt off")
+        escalations_service.create_escalation(org, "other", "Something felt off")
 
         with org_scoped_session(str(org.id)) as db:
             draft = Policy(org_id=org.id, answers={}, status="draft", storage_key="policies/x/y/document.docx", created_by=assure.id)
@@ -72,7 +72,7 @@ def test_get_summary_role_gating() -> None:
         assert operator_summary.tool_request_counts == {}
         assert operator_summary.training_summary is None
         assert len(operator_summary.my_tool_requests) == 1
-        assert len(operator_summary.my_alerts) == 1
+        assert not hasattr(operator_summary, "my_alerts")  # anonymous - no per-user alerts field exists at all
 
         assure_summary = dashboard_service.get_summary(org, assure)
         assert len(assure_summary.pending_tool_requests) == 1

@@ -28,9 +28,11 @@ import {
 const BUSINESS_ROLES = ["govern", "assure", "operator"] as const;
 const ASSIGNABLE_SYSTEM_ROLES = ["user", "admin"] as const;
 
+// No {{reporter_email}} placeholder - escalations are anonymous, so this
+// template (and the app itself) never has a reporter identity to offer.
 const DEFAULT_ESCALATION_TEMPLATE = {
   subject: "[Q Tower] New escalation: {{category}}",
-  body: "{{reporter_email}} raised a new escalation.\n\nCategory: {{category}}\n\n{{description}}",
+  body: "A new anonymous escalation was raised.\n\nCategory: {{category}}\n\n{{description}}",
 };
 
 // Kept in sync with tools/prompts.py::DEFAULT_TOOL_ASSESSMENT_PROMPT -
@@ -242,8 +244,8 @@ function EmailTemplatesSection() {
           <Textarea rows={4} value={body} onChange={(e) => setBody(e.target.value)} />
         </div>
         <p className="text-xs text-muted-foreground">
-          Available placeholders: <code>{"{{reporter_email}}"}</code>, <code>{"{{category}}"}</code>,{" "}
-          <code>{"{{description}}"}</code>
+          Available placeholders: <code>{"{{category}}"}</code>, <code>{"{{description}}"}</code>. No reporter
+          identity is ever available here - Raise Alert is anonymous.
         </p>
         <div className="flex items-center gap-3 pt-1">
           <Button size="sm" disabled={saving} onClick={save}>
