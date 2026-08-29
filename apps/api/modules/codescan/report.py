@@ -37,14 +37,16 @@ _SEVERITY_COLOR = {"critical": "#B3261E", "high": "#E0A33C", "medium": "#5B4FCF"
 # previous "grouped by category, severities mixed" layout, since the point
 # of this structure is "what needs fixing first," not "what kind of bug is
 # this."
-# autoescape=True (Trivy/semgrep-flagged in a real Code Scan of this repo as
-# a real gap, not a false positive): every finding's description/file_path
-# below is sourced from the SCANNED repo's own content (a tool's own output
-# can echo back a crafted file path or code snippet from the repo being
-# scanned) - without escaping, that untrusted text lands directly in this
-# report's HTML before it's rendered to PDF. No template value here needs
-# raw HTML (no `|safe` used anywhere below), so autoescape is a pure
-# hardening change with no behavior change for legitimate findings.
+# autoescape=True (semgrep-flagged in a real Code Scan of this repo as a
+# real gap, not a false positive - the first time round): every finding's
+# description/file_path below is sourced from the SCANNED repo's own
+# content (a tool's own output can echo back a crafted file path or code
+# snippet from the repo being scanned) - without escaping, that untrusted
+# text lands directly in this report's HTML before it's rendered to PDF.
+# No template value here needs raw HTML (no `|safe` used anywhere below),
+# so autoescape is a pure hardening change with no behavior change for
+# legitimate findings. See render_report_pdf()'s `.render()` call below for
+# why semgrep still flags this on every re-scan despite the fix.
 _TEMPLATE = Template(
     autoescape=True,
     source="""
@@ -150,7 +152,16 @@ def render_report_pdf(
         category_counts[f["category"]] = category_counts.get(f["category"], 0) + 1
     taxonomy_summary = [{"label": c.label, "count": category_counts.get(c.key, 0)} for c in TIER1_CATEGORIES]
 
-    html_content = _TEMPLATE.render(
+    # semgrep flags this .render() call on every re-scan even with
+    # autoescape=True set on _TEMPLATE above - its rule
+    # (direct-use-of-jinja2) just pattern-matches any jinja2 render call
+    # and can't see the autoescape kwarg's value, so it can never be
+    # satisfied here short of not using Jinja2 at all. That's a false
+    # positive given the autoescape fix above directly addresses what the
+    # rule's own message warns about ("may bypass HTML escaping") -
+    # suppressed with the reasoning on record, not left to recur on every
+    # future scan.
+    html_content = _TEMPLATE.render(  # nosemgrep: python.flask.security.xss.audit.direct-use-of-jinja2.direct-use-of-jinja2
         repo_full_name=repo_full_name,
         commit_sha=commit_sha,
         scanned_at=datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),

@@ -1,0 +1,13 @@
+# DS-0026: "Add HEALTHCHECK instruction in your Dockerfile" - flagged on
+# infra/Dockerfile.api. Deliberately not fixed at the Dockerfile level: that
+# image is shared by two different roles (docker-compose.yml's `api` and
+# `worker` services, differing only in `command:`), so a single baked-in
+# HEALTHCHECK can't be correct for both (worker has no HTTP server to curl).
+# Each service instead has its own healthcheck: block directly in
+# docker-compose.yml (curl :8000/health for api, `celery inspect ping` for
+# worker) - functionally equivalent, just defined where it can be
+# role-aware. See infra/Dockerfile.api's own comment for the full reasoning
+# and confirmation this inline-comment suppression doesn't work for a
+# whole-file structural check like this one (hence a .trivyignore entry,
+# not `# trivy:ignore:DS-0026`).
+DS-0026

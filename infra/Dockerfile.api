@@ -1,3 +1,17 @@
+# Deliberately no Dockerfile-level HEALTHCHECK (Trivy's DS-0026, suppressed
+# via the repo-root .trivyignore - an inline `# trivy:ignore:DS-0026`
+# comment does NOT work for this particular check, confirmed by testing
+# both: DS-0026 is a whole-file structural check ("does this Dockerfile
+# have a HEALTHCHECK anywhere"), not tied to one instruction, so Trivy's
+# per-line ignore comment mechanism doesn't apply to it). This image is
+# shared by two different roles (docker-compose.yml's `api` and `worker`
+# services both build from this file, differing only in their `command:`)
+# - a curl-the-HTTP-port check baked in here would be wrong for the worker
+# (no HTTP server). Each service instead gets its own correct healthcheck:
+# block in docker-compose.yml (curl :8000/health for api, `celery inspect
+# ping` for worker) - functionally equivalent to a Dockerfile HEALTHCHECK,
+# just defined where it can actually be role-aware (confirmed real via
+# `docker compose ps` showing both containers report healthy).
 FROM python:3.12-slim
 
 WORKDIR /app

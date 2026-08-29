@@ -3,33 +3,80 @@ uvicorn[standard]==0.34.0
 sqlalchemy==2.0.36
 alembic==1.14.0
 psycopg[binary]==3.2.3
-pydantic==2.10.4
-pydantic-settings==2.7.0
+# 2.12.5 (was 2.10.4) - not a deliberate bump, litellm==1.83.10's own
+# dependency floor pulled this forward as a transitive requirement; kept
+# explicit here (not left to resolve implicitly) so a fresh install is
+# deterministic. Full test suite re-verified green.
+pydantic==2.12.5
+# 2.15.0 (was 2.7.0) - litellm==1.98.0 requires >=2.14.1. Full test suite
+# re-verified green.
+pydantic-settings==2.15.0
 celery==5.4.0
 redis==5.2.1  # also used directly by core/rate_limit.py, not just as celery's broker
-boto3==1.35.90
+# 1.43.83 (was 1.35.90) - litellm==1.98.0 requires >=1.43.1. Full test
+# suite re-verified green (storage.py's S3-compatible calls against MinIO
+# are unaffected - same boto3 client API, just a newer release).
+boto3==1.43.83
 httpx==0.28.1
-pyjwt[crypto]==2.10.1
-# 1.83.0 (was 1.56.4) - the fixed version for CVE-2026-35030 (GHSA-jjhc-v7c2-5hh6,
-# Trivy-flagged in a real Code Scan of this repo): an OIDC-userinfo auth-bypass
-# in LiteLLM's proxy server, reachable only with enable_jwt_auth: true, which
-# this app never sets (litellm is used here purely as a library via
-# ai_gateway/providers/litellm_provider.py, never as the standalone proxy) -
-# so the practical exposure was ~zero, but the vulnerable code was still
-# shipping in the installed package, so upgraded rather than left as an
-# accepted risk. 1.83.0 is the earliest patched release (no backport to the
-# 1.56.x/1.7x lines exists) and drops the httpx<0.28.0 constraint 1.56.4 had
-# (1.83.0 only requires httpx>=0.23.0) - the old httpx pin/comment above is
-# gone because that workaround is no longer needed. Full test suite (103
-# tests) re-verified green against 1.83.0 before pinning.
-litellm==1.83.0
+# 2.13.0 (was 2.10.1) - semgrep==1.175.0 requires ~=2.13.0. Full test suite
+# re-verified green (licensing/service.py's RS256 validation and
+# identity's session-cookie signing are unaffected - PyJWT's public API
+# hasn't changed across this range).
+pyjwt[crypto]==2.13.0
+# 1.98.0 (was 1.56.4; briefly 1.83.0, then 1.83.10) - two CVEs found across
+# two rounds of re-scanning this repo with its own Code Scan feature:
+#  - CVE-2026-35030 (GHSA-jjhc-v7c2-5hh6): OIDC-userinfo cache-key-collision
+#    auth bypass in LiteLLM's proxy server, fixed in 1.83.0.
+#  - CVE-2026-42208 (GHSA-r75f-5x8p-qvmc, CVSS 9.3, KEV-listed, exploited in
+#    the wild ~36h after disclosure): SQL injection via a crafted
+#    Authorization header against the proxy's API-key-check query, affects
+#    1.81.16-1.83.6, fixed in 1.83.7 (1.83.10 is upstream's own recommended
+#    "-stable" pin for that fix).
+# Both vulnerabilities live entirely in the standalone LiteLLM *proxy
+# server* - reachable only with enable_jwt_auth: true / the proxy's own
+# DB-backed API-key auth, neither of which this app uses (litellm is a
+# library dependency here, called directly via
+# ai_gateway/providers/litellm_provider.py's litellm.completion(), never
+# run as the standalone proxy) - so practical exposure was ~zero both
+# times, but the vulnerable code was still shipping in the installed
+# package, so upgraded rather than left as an accepted risk each time.
+#
+# Landed on 1.98.0 (latest stable), not the smallest CVE-clearing version
+# (1.83.7/1.83.10), because of a real packaging conflict a *fresh* install
+# hit that the native dev venv never surfaced (same class of gotcha as the
+# old httpx<0.28.0 note this comment used to carry): every 1.8x litellm
+# release hard-pins `click==8.1.8` and `importlib-metadata==8.5.0` exactly,
+# which collides with semgrep's own transitive pins on those same packages
+# (see semgrep's pin/comment below) with no version of either package able
+# to satisfy both sides - a real `ResolutionImpossible` on a clean
+# `pip install -r requirements.txt` (confirmed via a from-scratch, no-cache
+# Docker build, not just the native venv). 1.98.0 switched both of those to
+# ranges (`click<9.0,>=8.0.0`, `importlib-metadata<9.0,>=8.0.0`), which is
+# what actually clears the conflict - a smaller litellm bump alone
+# couldn't. httpx<0.28.0 is no longer required either (modern litellm only
+# needs httpx>=0.23.0) - the old pin/comment for that constraint is gone.
+# Full test suite (103 tests) and a from-scratch Docker build both
+# re-verified green against this exact version pair.
+litellm==1.98.0
 docxtpl==0.19.0
 python-multipart==0.0.20
 bcrypt==4.2.1
 
 # --- Milestone 13: AI Code Scan ---
 setuptools<81  # semgrep's opentelemetry tracing dep still imports pkg_resources, removed from setuptools 81+
-semgrep==1.99.0
+# 1.175.0 (was 1.99.0) - forced by the litellm bump above: litellm==1.83.10
+# hard-pins importlib-metadata==8.5.0, but semgrep==1.99.0's own
+# opentelemetry-api~=1.25.0 dependency requires importlib-metadata<=7.1 -
+# no version of importlib-metadata can satisfy both, so a fresh `pip
+# install -r requirements.txt` (confirmed via a real Dockerfile.api build,
+# not just the native venv, which tolerated the stale conflict) fails
+# outright with ResolutionImpossible. semgrep>=1.175.0's
+# opentelemetry-api~=1.37.0 relaxes that to importlib-metadata<8.8.0,>=6.0,
+# which 8.5.0 satisfies. Confirmed via a real Docker build + a live Code
+# Scan afterward that --config=auto's rule IDs (referenced by the
+# `# nosemgrep: <rule-id>` comments elsewhere in this repo) are unaffected
+# - they come from Semgrep's registry, not this CLI version.
+semgrep==1.175.0
 bandit==1.8.0
 # 3.1.6 (was 3.1.5) - fixes CVE-2025-27516 (GHSA-cpwx-vrp4-4pq7, Trivy-flagged
 # in a real Code Scan of this repo), a sandbox breakout via the |attr filter.
