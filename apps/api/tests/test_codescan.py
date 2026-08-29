@@ -44,9 +44,16 @@ def _delete_org(org: Org) -> None:
 
 
 def test_encrypt_decrypt_round_trip() -> None:
-    ciphertext = encrypt_secret("-----BEGIN PRIVATE KEY-----\nfake\n-----END PRIVATE KEY-----")
-    assert ciphertext != "-----BEGIN PRIVATE KEY-----\nfake\n-----END PRIVATE KEY-----"
-    assert decrypt_secret(ciphertext) == "-----BEGIN PRIVATE KEY-----\nfake\n-----END PRIVATE KEY-----"
+    # A PEM-shaped placeholder, not a real key - its body is literally the
+    # word "fake". gitleaks' private-key rule matches on the PEM header/
+    # footer alone regardless of content (confirmed false positive via a
+    # real Code Scan of this repo) - `gitleaks:allow` is the tool-native
+    # way to mark an individual reviewed line, rather than a broad
+    # .gitleaks.toml allowlist that could also swallow a real leaked key
+    # accidentally pasted into a future test.
+    ciphertext = encrypt_secret("-----BEGIN PRIVATE KEY-----\nfake\n-----END PRIVATE KEY-----")  # gitleaks:allow
+    assert ciphertext != "-----BEGIN PRIVATE KEY-----\nfake\n-----END PRIVATE KEY-----"  # gitleaks:allow
+    assert decrypt_secret(ciphertext) == "-----BEGIN PRIVATE KEY-----\nfake\n-----END PRIVATE KEY-----"  # gitleaks:allow
 
 
 def test_create_github_connection_validates_against_the_real_api(monkeypatch) -> None:

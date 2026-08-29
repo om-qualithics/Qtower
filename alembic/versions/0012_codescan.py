@@ -21,9 +21,20 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def _rls(table: str, policy: str) -> None:
-    op.execute(f'ALTER TABLE "{table}" ENABLE ROW LEVEL SECURITY')
-    op.execute(f'ALTER TABLE "{table}" FORCE ROW LEVEL SECURITY')
-    op.execute(
+    # semgrep flags all three op.execute() calls below as a possible SQL
+    # injection (formatted-sql-query / sqlalchemy-execute-raw-query,
+    # confirmed via a real Code Scan of this repo, semgrep's own confidence
+    # was already "low"). False positive: `table`/`policy` are always
+    # hardcoded string literals at the three call sites below (never a
+    # variable that traces back to user input), and this runs once at
+    # `alembic upgrade` time from the CLI, never in a request path - the
+    # same "RLS setup via f-string DDL with literal names" shape every
+    # migration in this repo uses (see CLAUDE.md's RLS pattern). Marked
+    # inline rather than a directory-wide semgrep ignore so a genuinely
+    # different finding in a future migration still surfaces.
+    op.execute(f'ALTER TABLE "{table}" ENABLE ROW LEVEL SECURITY')  # nosemgrep
+    op.execute(f'ALTER TABLE "{table}" FORCE ROW LEVEL SECURITY')  # nosemgrep
+    op.execute(  # nosemgrep
         f"""
         CREATE POLICY {policy} ON "{table}"
         USING (org_id = current_setting('app.current_org_id', true)::uuid)

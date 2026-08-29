@@ -31,5 +31,11 @@ bcrypt==4.2.1
 setuptools<81  # semgrep's opentelemetry tracing dep still imports pkg_resources, removed from setuptools 81+
 semgrep==1.99.0
 bandit==1.8.0
-Jinja2==3.1.5  # already a transitive dep of docxtpl - pinned directly now that codescan/report.py uses it itself
+# 3.1.6 (was 3.1.5) - fixes CVE-2025-27516 (GHSA-cpwx-vrp4-4pq7, Trivy-flagged
+# in a real Code Scan of this repo), a sandbox breakout via the |attr filter.
+# Requires SandboxedEnvironment + attacker-controlled template content to
+# exploit, neither of which applies here (codescan/report.py's Template()
+# and docxtpl's Environment are both plain, non-sandboxed, and only ever
+# render our own static templates) - upgraded anyway since it's a free fix.
+Jinja2==3.1.6  # already a transitive dep of docxtpl - pinned directly now that codescan/report.py uses it itself
 weasyprint==63.1  # HTML+CSS -> PDF for the scan report; needs system libs, see infra/Dockerfile.api

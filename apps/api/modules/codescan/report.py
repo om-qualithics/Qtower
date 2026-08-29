@@ -37,8 +37,17 @@ _SEVERITY_COLOR = {"critical": "#B3261E", "high": "#E0A33C", "medium": "#5B4FCF"
 # previous "grouped by category, severities mixed" layout, since the point
 # of this structure is "what needs fixing first," not "what kind of bug is
 # this."
+# autoescape=True (Trivy/semgrep-flagged in a real Code Scan of this repo as
+# a real gap, not a false positive): every finding's description/file_path
+# below is sourced from the SCANNED repo's own content (a tool's own output
+# can echo back a crafted file path or code snippet from the repo being
+# scanned) - without escaping, that untrusted text lands directly in this
+# report's HTML before it's rendered to PDF. No template value here needs
+# raw HTML (no `|safe` used anywhere below), so autoescape is a pure
+# hardening change with no behavior change for legitimate findings.
 _TEMPLATE = Template(
-    """
+    autoescape=True,
+    source="""
 <!DOCTYPE html>
 <html>
 <head>

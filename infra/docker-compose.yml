@@ -149,6 +149,17 @@ services:
       JACKSON_BASE_URL: http://jackson:5225
     ports:
       - "${API_PORT:-8000}:8000"
+    # Trivy-flagged (real Code Scan of this repo) "no HEALTHCHECK" on
+    # Dockerfile.api - defined here per-service instead of baked into the
+    # Dockerfile, matching this file's own convention (postgres/redis/minio
+    # above), since Dockerfile.api is shared by both `api` and `worker`
+    # (same image, different `command:`) and a single baked-in HEALTHCHECK
+    # can't be correct for both roles at once.
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   worker:
     build:
@@ -176,3 +187,14 @@ services:
       # container-internal "minio" hostname and 404 in the browser.
       MINIO_PUBLIC_ENDPOINT: http://localhost:${MINIO_API_PORT:-9000}
       JACKSON_BASE_URL: http://jackson:5225
+    # No HTTP server to curl here (see the `api` service's healthcheck
+    # comment above for why this isn't baked into the Dockerfile) - `celery
+    # inspect ping` is the standard way to confirm a worker process is
+    # actually alive and consuming from the broker, not just that the
+    # container is running.
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A apps.api.core.celery_app inspect ping -d celery@$$HOSTNAME || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 15s
