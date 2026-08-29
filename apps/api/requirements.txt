@@ -59,7 +59,16 @@ pyjwt[crypto]==2.13.0
 # re-verified green against this exact version pair.
 litellm==1.98.0
 docxtpl==0.19.0
-python-multipart==0.0.20
+# 0.0.22 (was 0.0.20) - fixes CVE-2026-24486 (GHSA-wp53-j4wj-2cfg,
+# Trivy-flagged in a real Code Scan of this repo): arbitrary file write via
+# path traversal, but only when a caller opts into python-multipart's own
+# on-disk UPLOAD_DIR + UPLOAD_KEEP_FILENAME=True feature - this app never
+# uses either (every multipart upload here - escalation attachments,
+# policy uploads - goes through FastAPI's UploadFile, read into memory via
+# core/uploads.py::read_limited() and stored in MinIO under an
+# app-generated key, never python-multipart's own filesystem writer), so
+# practical exposure was zero, but upgraded anyway since it's a free fix.
+python-multipart==0.0.22
 bcrypt==4.2.1
 
 # --- Milestone 13: AI Code Scan ---
