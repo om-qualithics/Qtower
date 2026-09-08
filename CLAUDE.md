@@ -145,12 +145,36 @@ stopping these two containers — `docker compose --profile codescan down`.
   function, not at module top level) specifically so a machine without those libraries
   can still boot the rest of the API. Real scanner-pipeline testing needs
   `infra/Dockerfile.api` built and run, not the native dev venv.
-- **`httpx` must stay `<0.28.0`** — `litellm==1.56.4` requires it, and a fresh
-  `pip install -r requirements.txt` (e.g. a Docker build) enforces this strictly even
-  though an already-populated native venv can silently tolerate the conflict.
+- **A fresh `pip install -r requirements.txt` (e.g. a `--no-cache` Docker build) is the
+  only way to catch a real dependency conflict** — an already-populated native venv
+  tolerates version mismatches a clean resolve won't. Bit this project twice: the old
+  `httpx<0.28.0` constraint (`litellm==1.56.4`'s own pin, since relaxed — no longer an
+  issue as of the current `litellm` pin) and, worse, a genuine `ResolutionImpossible`
+  between `litellm`'s hard pins on `click`/`importlib-metadata` and `semgrep`'s
+  transitive pins on those same packages, only found via a `--no-cache` build of
+  `infra/Dockerfile.api`, never via the native venv (see `apps/api/requirements.txt`'s
+  own pin comments for the exact versions and reasoning). When bumping any pinned
+  dependency in `requirements.txt`, verify via `docker compose --profile codescan build
+  --no-cache api worker`, not just `pytest` in the native venv.
 - **`setuptools` must stay `<81`** — Semgrep's own tracing dependency
   (`opentelemetry-instrumentation-requests`) still imports the legacy `pkg_resources`
   module, removed from `setuptools` 81+.
+- **Suppressing a confirmed Code Scan false positive is tool-specific, and the wrong
+  mechanism silently does nothing** (all three below were caught by actually re-running
+  the tool after adding a suppression, not by assuming the standard-looking comment
+  worked): **gitleaks** auto-loads a `.gitleaks.toml` at the scanned repo's root (no
+  `--config` flag needed — see `.gitleaks.toml`'s own comment) for a broad
+  pattern-based allowlist, or an inline `# gitleaks:allow` comment on the exact flagged
+  line for one-off cases (e.g. a test fixture's fake PEM string). **semgrep**'s inline
+  `# nosemgrep` (bare, or `# nosemgrep: <rule-id>` to target one rule) must go on the
+  line semgrep's own JSON output reports as the match's *start* line — for a multi-line
+  call this is often not where you'd guess (e.g. the opening `op.execute(` line, or a
+  `.render()` call two lines below the `Template(...)` constructor it's really about,
+  not the constructor itself). **Trivy** auto-loads a `.trivyignore` at the repo root
+  (one check ID per line) for a whole-file/structural check like "Dockerfile has no
+  HEALTHCHECK" (`DS-0026`) — its inline `# trivy:ignore:<ID>` comment only works for
+  checks tied to one specific instruction, not structural ones; confirmed by testing
+  both before picking `.trivyignore`.
 - **Docker Compose's `env_file:` loading interpolates `$word` as a `${word}` variable
   reference** — any secret containing a literal `$` (a bcrypt hash's `$2b$12$...` format
   is the concrete case that bit this project) gets silently corrupted when passed into a
@@ -210,6 +234,61 @@ stopping these two containers — `docker compose --profile codescan down`.
   side-by-side panel (like the one above), give the main column `min-w-0 flex-1` inside a
   `flex` row so it can shrink below its own `clamp()` preference when the panel is open,
   instead of overflowing.
+- **Route-driven tabs, not client-side tab state** — `app/(app)/ai-center/layout.tsx` +
+  `components/ui/tabs.tsx` (Milestone 15). Each tab is a real Next.js route segment
+  (`/ai-center/tools`, `/ai-center/project`, `/ai-center/vendor-register`), not a
+  conditionally-rendered panel — keeps every tab deep-linkable and back-button-correct,
+  matching how every other feature in this app (`/policy`, `/escalations`, ...) is its
+  own route. `components/ui/tabs.tsx` wraps `@base-ui/react`'s `Tabs` primitive in
+  **route-driven mode**: `Tabs.Root value={activeTabFromPathname}` with no
+  `onValueChange`, each `Tabs.Tab` rendered as `render={<Link .../>} nativeButton=
+  {false}` — base-ui's `Tab` only calls `onValueChange` (a safe no-op when omitted) on
+  click, never `preventDefault()`, so real `Link` navigation still fires; the base-ui
+  active-tab data attribute is `data-active`, not `data-selected` — check a primitive's
+  actual compiled source before styling a `data-[x]:` variant, its attribute names
+  aren't consistent across every base-ui component. Adding a fourth tab means adding a
+  route segment under `ai-center/` and one entry in `layout.tsx`'s `TABS` array, not
+  touching the tab-bar component itself.
+- **A moved page gets a redirect stub at its old URL, not a deletion** — `app/(app)/
+  tools/page.tsx` is now just `redirect("/ai-center/tools")` (a Server Component; the
+  App Router's `redirect()` from `next/navigation`) after AI Tools moved under AI
+  Center. Cheap insurance against a saved bookmark/link, and the actual convention to
+  follow the next time a route moves rather than a fresh page. **Verifying a `redirect()`
+  stub needs a real browser, not `curl`** — Next 16 doesn't always send a bare HTTP 3xx;
+  for a request that would otherwise stream, it embeds a `NEXT_REDIRECT;replace;
+  <path>;307;` marker into the RSC payload instead, which only a JS-executing client
+  acts on. `curl` sees a plain `200 OK` with no `Location` header and looks broken even
+  when it isn't — read the response body for the `NEXT_REDIRECT` marker to confirm the
+  target, or better, drive a real headless browser.
+- **`curl` can't verify any authenticated page's rendered content in this app** — every
+  page under `(app)/` is wrapped by `app-shell.tsx`'s `AppShell`, a Client Component
+  that renders only a "Loading..." fallback until its own `fetchCurrentUser()` effect
+  resolves client-side. The server-rendered HTML `curl` sees is always just that
+  fallback, never the actual page content, regardless of auth state — this isn't new or
+  a bug, it's true for every existing authenticated page. Confirming real content
+  (or a client-side redirect, or a tab click, or dark mode) needs a real browser
+  (Playwright/`chromium-cli`), not a `curl`+grep check.
+- **A "Request" flow is a routed page, not a `Dialog` popup** (Milestone 18) —
+  `app/(app)/ai-center/{tools,project,vendor-register}/request/page.tsx`, one per tab.
+  Each is a self-contained multi-step wizard using the shared
+  `components/ui/wizard-progress-bar.tsx::WizardProgressBar` (a copy of
+  `components/policy/progress-bar.tsx::PolicyProgressBar`, kept as a copy under a
+  neutral name rather than a shared import so AI Center doesn't reach into
+  `components/policy/`) — same "Step N of M" + prev/next-title-pill look as
+  `/policy/new`, but **no server-side draft/autosave**: all step state lives in plain
+  React state and the actual `POST` fires once, atomically, on the final step's
+  submit — `/policy/new`'s per-step `PATCH` autosave only exists because `Policy` rows
+  already have a real draft lifecycle (`current_step`, resumable), which
+  `tool_request`/`project_request`/`vendor_request` don't and weren't given one for
+  this. A refreshed/abandoned wizard loses progress, same as an abandoned dialog did
+  before — not a regression. Shared cross-tab pieces: `lib/tiers.ts` (`TIER_KEYS`/
+  `TIER_LABELS`, used by both the Tools and Project wizards plus the existing Tools
+  catalog page — all three used to keep their own local copy) and
+  `components/vendor/checklist-answer-fieldset.tsx` (extracted from
+  `vendor-register/page.tsx`, still used there for the post-approval "Edit Checklist"
+  popup — a new `scrollable` prop defaults `true` to preserve that dialog's bounded-
+  height scrollbox, while the wizard passes `scrollable={false}` since a wizard step is
+  already a full scrollable page, not a fixed-height popup).
 
 ## Roles: who can do what
 
@@ -231,6 +310,10 @@ clause. Business role only matters for a `system_role="user"` account.
 | Manage training content | ✅ | ✅ | ❌ |
 | **Connect a GitHub App** (`codescan.connect`) | ❌ | ✅ | ❌ |
 | Trigger/view a code scan (`codescan.run`/`.view`) | ✅ | ✅ | ✅ |
+| Request a vendor (commercial or open-source) | ✅ | ✅ | ✅ |
+| Approve/reject a vendor request; edit checklist responses | ✅ | ✅ | ❌ |
+| Submit an AI Project request (use-case/workflow) | ✅ | ✅ | ✅ |
+| Approve/reject a project request; edit a project | ✅ | ✅ | ❌ |
 
 **Admin-only regardless of business role** (`system_role` must be `admin`/`super_admin` —
 no business role passes these on its own): manage SSO connection, manage users, manage
@@ -255,7 +338,82 @@ reports, **anonymous** — no reporter is ever stored — routes to govern/assur
 `training/` (shared training catalog + per-org completion tracking) · `dashboard/`
 (single aggregation endpoint composing every other module's service layer) ·
 `codescan/` (Milestone 13 — GitHub-connected repo scanning: Semgrep/Bandit/Gitleaks/
-Trivy, deduplicated findings, PDF report, dashboard summary + history).
+Trivy, deduplicated findings, dashboard summary + history; findings sorted and grouped
+critical → high → medium → low everywhere — the API's `list_findings()`, the frontend's
+severity filter tags on the scan detail view, and the PDF report's structure, which
+matches `Qtower_CodeScan_Phase1_Handoff.md`'s spec: an executive summary, a full
+30-item Tier 1 taxonomy table (found yes/no + occurrence count per category), then
+findings grouped by severity) · `vendors/` (Milestone 14, part of the in-progress
+**AI Center** rebuild — see `AI_Center_Technical_Handoff.md` — commercial + open-source
+vendor risk register: a fixed, seeded checklist (`vendor_checklist_item`, no org_id/RLS,
+same shared-catalog precedent as `training_module`) scored **deterministically and
+synchronously** — no Celery, no `ai_gateway` call, unlike every other request/approval
+flow in this app, since the checklist is already structured Y/N data with one
+mechanically correct evaluation. Any `must_have` item answered "no" forces
+`status="restricted"` regardless of every other answer; `good_to_have`/`optional`
+answers produce a weighted score. `vendor_request`/`vendor` follows the exact same
+circular-FK migration sequencing and self-approval guard as `tool_request`/
+`approved_tool`. **The requester answers the checklist directly on the request** (not
+deferred to govern/assure after approval) — `create_vendor_request()` computes
+`projected_status`/`overall_score` synchronously at submission via the same
+`scoring.score_vendor()` an approved vendor uses, and `approve_vendor_request()` copies
+the request's answers into the new `vendor`'s own `vendor_checklist_response` rows and
+rescores fresh from them rather than trusting the request's cached projection verbatim.
+`govern`/`assure` can still correct an approved vendor's checklist afterward via the
+existing edit affordance — the request-time checklist doesn't replace that, it just
+means a vendor is no longer created blank) · `projects/` (Milestone 16, the third AI
+Center tab — AI use-case/workflow submissions, assessed by AI precheck exactly like
+`tools/`: a direct structural copy of `tools/prompts.py`/`tools/tasks.py`, same
+skip-if-no-active-policy gate, same never-auto-approve fail-safe JSON parsing, same
+Celery-task-only rule, same admin-editable-prompt-with-fallback pattern
+(`deployment_config.project_assessment_prompt`, not yet exposed via a Settings UI
+section). `project_request`/`project` follows the same circular-FK migration
+sequencing and self-approval guard as `tool_request`/`approved_tool`. Linking Tools/
+Vendors is **not a hard gate** — a project can submit with zero links — via
+`project_tool_link`/`project_vendor_link`: each row is exactly one of a real catalog
+reference (`tool_id`/`vendor_id`) or a free-text `other_name` for something not in
+inventory (both invariants enforced in `service.py`, not a DB constraint), and exactly
+one of `project_id`/`request_id` (a still-pending request's proposed links, or a real
+project's links after approval — the schema deviates slightly from the original plan
+sketch, which only listed `project_id`, to let a request's links be visible/assessed
+before approval exists). `approve_project_request()` copies (not moves) a request's
+link rows into new `project_id` rows, same copy-on-approve pattern `vendors/` already
+established for checklist responses. The "not registered in inventory" tag is
+structural, set at submission time — never inferred by the LLM — though the precheck
+prompt is given every linked tool/vendor labeled either way so its explanation can
+reference them; a real run showed the model correctly flagging an unregistered link
+against the policy's own "no AI tools without governance review" clause).
+`approved_tool`/`vendor` both gained real logo support (Milestone 17) — two input
+paths, an upload to MinIO or pasting a URL directly. An uploaded logo's `logo_url`
+column holds this app's own streaming route (e.g. `/tools/approved/{id}/logo-file`),
+not a MinIO/S3 URL — the bucket isn't public and a presigned URL would eventually
+expire out from under a catalog card that renders it indefinitely; that streaming GET
+route is deliberately the one unauthenticated endpoint on an otherwise session-gated
+router, since a cross-origin `<img>` tag (frontend on a different port than the API)
+won't carry the httponly session cookie without extra plumbing, and a logo is
+non-sensitive branding-adjacent imagery, not data worth gating. Shared validation/key
+logic lives in `apps/api/core/media.py` (512KB cap, PNG/JPEG/SVG only, one fixed
+extensionless storage key per entity so a re-upload overwrites in place) rather than
+duplicated per module. Milestone 18 replaced every AI Center "Request" **popup** with a
+dedicated **page** at `/ai-center/{tools,project,vendor-register}/request` — a
+multi-step wizard (progress bar, one section per step, Back/Next) matching `/policy/new`
+visually, but **purely client-side across steps** (plain React state, one atomic submit
+on the final step) rather than `/policy/new`'s server-autosaved-draft model, since
+`tool_request`/`project_request`/`vendor_request` have no draft/current-step concept to
+autosave into — building one was explicitly out of scope. `tool_request` gained
+`data_tiers`/`requires_enterprise_account`, `project_request` gained `data_tiers`
+(migration `0018`) per `AI_Center_Technical_Handoff.md`'s "Request forms" section; both
+feed into their respective `ai_gateway` precheck prompts, not just stored inertly. The
+Vendor Register wizard unifies commercial (15 questions) and open-source (a real
+**20-question** set — 6 Must Have / 8 Good to Have / 6 Optional, replacing Milestone
+14's 5-item placeholder guess, confirmed via a direct DB check that zero real checklist
+responses referenced the old items before deleting them) behind one "Request Vendor"
+entry point that picks the type on step 1 and swaps both the question set and the
+basic-info field labels ("Website"/"Business justification" vs. "Repository, URL"/
+"Intended use case") accordingly. Every Must Have question requires an explicit answer
+before the wizard's Step 2 will advance — client-side only, the server-side scoring
+rule that an *unanswered* must-have doesn't force `restricted` (only an explicit "no"
+does) is deliberately unchanged.
 
 ## Where to look for more
 

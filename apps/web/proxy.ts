@@ -23,5 +23,14 @@ export function proxy() {
 }
 
 export const config = {
-  matcher: ["/", "/dashboard/:path*", "/policy/:path*", "/tools/:path*", "/escalations/:path*", "/training/:path*", "/settings/:path*"],
+  matcher: [
+    "/",
+    "/dashboard/:path*",
+    "/policy/:path*",
+    "/tools/:path*",
+    "/ai-center/:path*",
+    "/escalations/:path*",
+    "/training/:path*",
+    "/settings/:path*",
+  ],
 };

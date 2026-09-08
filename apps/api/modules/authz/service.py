@@ -60,6 +60,39 @@ _PERMISSIONS: dict[str, list[dict[str, set[str] | None]]] = {
     # (Milestone 13), matching training.view/escalations.create's shape.
     "codescan.run": [{"system_role": None, "business_role": None}],
     "codescan.view": [{"system_role": None, "business_role": None}],
+    # AI Center - Vendor Register (Milestone 14). Same shape as tools.* -
+    # view is open, request is every business role, approve/manage are
+    # {govern, assure}. Vendor evaluation itself is deterministic scoring,
+    # not an AI precheck, so there's no separate "assess" action.
+    "vendor.view": [{"system_role": None, "business_role": None}],
+    "vendor.request": [
+        {"system_role": None, "business_role": {"govern", "assure", "operator"}},
+        {"system_role": {"admin", "super_admin"}, "business_role": None},
+    ],
+    "vendor.approve": [
+        {"system_role": None, "business_role": {"govern", "assure"}},
+        {"system_role": {"admin", "super_admin"}, "business_role": None},
+    ],
+    "vendor.manage": [
+        {"system_role": None, "business_role": {"govern", "assure"}},
+        {"system_role": {"admin", "super_admin"}, "business_role": None},
+    ],
+    # AI Center - AI Project (Milestone 16). Same flat {govern, assure}
+    # approval shape as tools.*/vendor.* - no per-request risk-tiered
+    # approver flag, per the build plan's explicit instruction.
+    "project.view": [{"system_role": None, "business_role": None}],
+    "project.request": [
+        {"system_role": None, "business_role": {"govern", "assure", "operator"}},
+        {"system_role": {"admin", "super_admin"}, "business_role": None},
+    ],
+    "project.approve": [
+        {"system_role": None, "business_role": {"govern", "assure"}},
+        {"system_role": {"admin", "super_admin"}, "business_role": None},
+    ],
+    "project.manage": [
+        {"system_role": None, "business_role": {"govern", "assure"}},
+        {"system_role": {"admin", "super_admin"}, "business_role": None},
+    ],
 }
 
 

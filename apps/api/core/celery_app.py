@@ -10,6 +10,7 @@ celery_app = Celery(
         "apps.api.modules.tools.tasks",
         "apps.api.modules.notifications.tasks",
         "apps.api.modules.codescan.tasks",
+        "apps.api.modules.projects.tasks",
     ],
 )
 

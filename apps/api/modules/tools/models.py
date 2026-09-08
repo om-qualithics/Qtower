@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import ForeignKey, Text
+from sqlalchemy import Boolean, ForeignKey, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.dialects.postgresql import ENUM as PgEnum
 from sqlalchemy.orm import Mapped, mapped_column
@@ -35,6 +35,7 @@ class ApprovedTool(Base):
     access_url: Mapped[str] = mapped_column(Text, nullable=False)
     allowed_tiers: Mapped[list] = mapped_column(JSONB, nullable=False, server_default="[]")
     details: Mapped[str | None] = mapped_column(Text, nullable=True)
+    logo_url: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     created_from_request_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("tool_request.id"), nullable=True
@@ -61,6 +62,8 @@ class ToolRequest(Base):
     name: Mapped[str] = mapped_column(Text, nullable=False)
     link: Mapped[str] = mapped_column(Text, nullable=False)
     intended_use_case: Mapped[str] = mapped_column(Text, nullable=False)
+    data_tiers: Mapped[list] = mapped_column(JSONB, nullable=False, server_default="[]")
+    requires_enterprise_account: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
 
     status: Mapped[str] = mapped_column(ToolRequestStatus, nullable=False, server_default="pending")
 

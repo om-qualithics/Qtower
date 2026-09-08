@@ -8,7 +8,13 @@ from apps.api.modules.ai_gateway.providers.base import ProviderResponse
 
 logger = logging.getLogger(__name__)
 
-MAX_TOKENS = 1024
+# Was 1024 - real M10 tool-assessment traffic showed the model exceeding
+# its "under 300 words" rationale instruction and hitting that cap exactly
+# (completion_tokens=1024 in llm_usage_log), truncating the JSON mid-string
+# and forcing a fail-safe "failed" assessment with no visible evaluation.
+# max_tokens is a ceiling, not a reservation - raising it only costs money
+# if the model actually generates more, so this is free headroom.
+MAX_TOKENS = 4096
 MAX_RETRIES = 3
 BASE_BACKOFF_SECONDS = 1.0
 

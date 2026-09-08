@@ -62,6 +62,8 @@ def _to_tool_request_out(org: Org, request) -> ToolRequestOut:
         name=request.name,
         link=request.link,
         intended_use_case=request.intended_use_case,
+        data_tiers=request.data_tiers,
+        requires_enterprise_account=request.requires_enterprise_account,
         status=request.status,
         ai_assessment_status=request.ai_assessment_status,
         ai_assessment_result=request.ai_assessment_result,

@@ -13,6 +13,12 @@ from apps.api.modules.tools import service, tasks
 from apps.api.modules.tools.models import ApprovedTool, ToolRequest
 from apps.api.modules.tools.service import ToolApprovalError, ToolRequestDuplicateError
 
+# Milestone 18 (Request forms) added a 150-word minimum on intended_use_case -
+# every test that isn't specifically exercising that validation needs a use
+# case long enough to clear it.
+SAMPLE_USE_CASE = " ".join(["word"] * 150)
+assert len(SAMPLE_USE_CASE.split()) == 150
+
 
 def _make_org(name: str) -> Org:
     db = SessionLocal()
@@ -125,11 +131,61 @@ def test_parse_assessment_raises_on_garbage() -> None:
         tasks._parse_assessment("not json at all")
 
 
+def test_create_request_rejects_use_case_under_150_words() -> None:
+    org = _make_org("Tools Short Use Case Org")
+    try:
+        requester = _make_user(org, "requester-short@example.com")
+        short_use_case = " ".join(["word"] * 149)
+        with pytest.raises(service.ToolRequestValidationError):
+            service.create_request(org, requester, "tool", "Short Use Case Tool", "https://example.com/s", short_use_case)
+    finally:
+        _delete_org(org)
+
+
+def test_create_request_accepts_use_case_at_exactly_150_words() -> None:
+    org = _make_org("Tools Boundary Use Case Org")
+    try:
+        requester = _make_user(org, "requester-boundary@example.com")
+        request = service.create_request(
+            org, requester, "tool", "Boundary Tool", "https://example.com/bnd", SAMPLE_USE_CASE
+        )
+        assert request.intended_use_case == SAMPLE_USE_CASE
+    finally:
+        _delete_org(org)
+
+
+def test_create_request_rejects_invalid_data_tier() -> None:
+    org = _make_org("Tools Invalid Tier Org")
+    try:
+        requester = _make_user(org, "requester-badtier@example.com")
+        with pytest.raises(service.ToolRequestValidationError):
+            service.create_request(
+                org, requester, "tool", "Bad Tier Tool", "https://example.com/bt", SAMPLE_USE_CASE,
+                data_tiers=["not_a_real_tier"],
+            )
+    finally:
+        _delete_org(org)
+
+
+def test_create_request_persists_data_tiers_and_enterprise_flag() -> None:
+    org = _make_org("Tools New Fields Org")
+    try:
+        requester = _make_user(org, "requester-newfields@example.com")
+        request = service.create_request(
+            org, requester, "tool", "New Fields Tool", "https://example.com/nf", SAMPLE_USE_CASE,
+            data_tiers=["confidential", "internal"], requires_enterprise_account=True,
+        )
+        assert request.data_tiers == ["confidential", "internal"]
+        assert request.requires_enterprise_account is True
+    finally:
+        _delete_org(org)
+
+
 def test_create_request_skips_assessment_without_active_policy() -> None:
     org = _make_org("Tools No Policy Org")
     try:
         requester = _make_user(org, "requester-nopolicy@example.com")
-        request = service.create_request(org, requester, "tool", "Unassessed Tool", "https://example.com/np", "use case")
+        request = service.create_request(org, requester, "tool", "Unassessed Tool", "https://example.com/np", SAMPLE_USE_CASE)
 
         assert request.ai_assessment_status == "skipped"
         assert request.ai_assessment_result is None
@@ -143,11 +199,11 @@ def test_create_request_rejects_normalized_duplicate_name() -> None:
     try:
         requester = _make_user(org, "requester@example.com")
         approver = _make_user(org, "approver@example.com", "govern")
-        request = service.create_request(org, requester, "tool", "Claude", "https://claude.ai", "coding help")
+        request = service.create_request(org, requester, "tool", "Claude", "https://claude.ai", SAMPLE_USE_CASE)
         service.approve_request(org, str(request.id), approver, description="AI assistant", allowed_tiers=["public"])
 
         with pytest.raises(ToolRequestDuplicateError):
-            service.create_request(org, requester, "tool", "  claude  ", "https://claude.ai/other", "again")
+            service.create_request(org, requester, "tool", "  claude  ", "https://claude.ai/other", SAMPLE_USE_CASE)
     finally:
         _delete_org(org)
 
@@ -156,7 +212,7 @@ def test_approve_request_rejects_self_approval() -> None:
     org = _make_org("Tools Self Approve Org")
     try:
         requester = _make_user(org, "requester2@example.com")
-        request = service.create_request(org, requester, "tool", "Some Tool", "https://example.com", "use case")
+        request = service.create_request(org, requester, "tool", "Some Tool", "https://example.com", SAMPLE_USE_CASE)
 
         with pytest.raises(ToolApprovalError):
             service.approve_request(org, str(request.id), requester, description="x", allowed_tiers=["public"])
@@ -169,7 +225,7 @@ def test_approve_request_rejects_non_pending_request() -> None:
     try:
         requester = _make_user(org, "requester3@example.com")
         approver = _make_user(org, "approver3@example.com", "govern")
-        request = service.create_request(org, requester, "tool", "Some Tool 2", "https://example.com/2", "use case")
+        request = service.create_request(org, requester, "tool", "Some Tool 2", "https://example.com/2", SAMPLE_USE_CASE)
         service.approve_request(org, str(request.id), approver, description="x", allowed_tiers=["public"])
 
         with pytest.raises(ToolApprovalError):
@@ -185,7 +241,7 @@ def test_approve_request_creates_catalog_entry_for_every_request_type(request_ty
         requester = _make_user(org, f"requester-{request_type}@example.com")
         approver = _make_user(org, f"approver-{request_type}@example.com", "govern")
         request = service.create_request(
-            org, requester, request_type, f"Thing ({request_type})", "https://example.com/x", "use case"
+            org, requester, request_type, f"Thing ({request_type})", "https://example.com/x", SAMPLE_USE_CASE
         )
         approved = service.approve_request(
             org, str(request.id), approver, description="one-liner", allowed_tiers=["public", "internal"]
@@ -206,7 +262,7 @@ def test_reject_request_happy_path() -> None:
     try:
         requester = _make_user(org, "requester4@example.com")
         approver = _make_user(org, "approver4@example.com", "govern")
-        request = service.create_request(org, requester, "tool", "Rejected Tool", "https://example.com/r", "use case")
+        request = service.create_request(org, requester, "tool", "Rejected Tool", "https://example.com/r", SAMPLE_USE_CASE)
 
         rejected = service.reject_request(org, str(request.id), approver, reason="not needed")
         assert rejected.status == "rejected"
@@ -221,7 +277,7 @@ def test_update_and_delete_approved_tool_direct_curation() -> None:
     try:
         requester = _make_user(org, "requester7@example.com")
         approver = _make_user(org, "approver7@example.com", "govern")
-        request = service.create_request(org, requester, "tool", "Curated Tool", "https://example.com/c", "use case")
+        request = service.create_request(org, requester, "tool", "Curated Tool", "https://example.com/c", SAMPLE_USE_CASE)
         approved = service.approve_request(org, str(request.id), approver, description="orig", allowed_tiers=["public"])
         tool_id = str(approved.resulting_tool_id)
 
@@ -239,6 +295,51 @@ def test_update_and_delete_approved_tool_direct_curation() -> None:
         _delete_org(org)
 
 
+def test_update_approved_tool_sets_and_clears_logo_url() -> None:
+    org = _make_org("Tools Logo URL Org")
+    try:
+        requester = _make_user(org, "requester-logo-url@example.com")
+        approver = _make_user(org, "approver-logo-url@example.com", "govern")
+        request = service.create_request(org, requester, "tool", "Logo Tool", "https://example.com/logo", SAMPLE_USE_CASE)
+        approved = service.approve_request(org, str(request.id), approver, description="d", allowed_tiers=[])
+        tool_id = str(approved.resulting_tool_id)
+
+        updated = service.update_approved_tool(
+            org, tool_id, name="Logo Tool", description="d", access_url="https://example.com/logo",
+            allowed_tiers=[], logo_url="https://cdn.example.com/logo.png",
+        )
+        assert updated.logo_url == "https://cdn.example.com/logo.png"
+
+        cleared = service.update_approved_tool(
+            org, tool_id, name="Logo Tool", description="d", access_url="https://example.com/logo",
+            allowed_tiers=[], logo_url=None,
+        )
+        assert cleared.logo_url is None
+    finally:
+        _delete_org(org)
+
+
+def test_upload_tool_logo_round_trips_bytes_and_content_type() -> None:
+    org = _make_org("Tools Logo Upload Org")
+    try:
+        requester = _make_user(org, "requester-logo-upload@example.com")
+        approver = _make_user(org, "approver-logo-upload@example.com", "govern")
+        request = service.create_request(org, requester, "tool", "Upload Logo Tool", "https://example.com/u", SAMPLE_USE_CASE)
+        approved = service.approve_request(org, str(request.id), approver, description="d", allowed_tiers=[])
+        tool_id = str(approved.resulting_tool_id)
+
+        png_bytes = b"\x89PNG\r\n\x1a\nfake-but-good-enough-for-a-storage-round-trip-test"
+        updated = service.upload_tool_logo(org, tool_id, "image/png", png_bytes)
+        assert updated is not None
+        assert updated.logo_url == f"/tools/approved/{tool_id}/logo-file"
+
+        data, content_type = service.get_tool_logo_bytes(org, tool_id)
+        assert data == png_bytes
+        assert content_type == "image/png"
+    finally:
+        _delete_org(org)
+
+
 def test_assess_tool_request_fails_safe_on_non_json_mock_response(monkeypatch) -> None:
     """The mock provider's canned text isn't JSON, so the task must land on
     ai_assessment_status="failed" and MUST NOT set ai_assessment_result -
@@ -249,7 +350,7 @@ def test_assess_tool_request_fails_safe_on_non_json_mock_response(monkeypatch) -
     try:
         _make_active_policy(org)
         requester = _make_user(org, "requester5@example.com")
-        request = service.create_request(org, requester, "tool", "Assessed Tool", "https://example.com/a", "use case")
+        request = service.create_request(org, requester, "tool", "Assessed Tool", "https://example.com/a", SAMPLE_USE_CASE)
 
         tasks.assess_tool_request(str(request.id), str(org.id))
 
@@ -265,7 +366,7 @@ def test_assess_tool_request_parses_valid_json_response(monkeypatch) -> None:
     try:
         _make_active_policy(org)
         requester = _make_user(org, "requester6@example.com")
-        request = service.create_request(org, requester, "tool", "Assessed Tool 2", "https://example.com/b", "use case")
+        request = service.create_request(org, requester, "tool", "Assessed Tool 2", "https://example.com/b", SAMPLE_USE_CASE)
 
         def _fake_complete(feature, org_arg, prompt, system=None):
             return GatewayResponse(

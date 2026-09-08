@@ -83,6 +83,8 @@ def assess_tool_request(request_id: str, org_id: str) -> None:
         name = request.name
         link = request.link
         use_case = request.intended_use_case
+        data_tiers = request.data_tiers
+        requires_enterprise_account = request.requires_enterprise_account
 
     try:
         policy_text = policy_service.get_active_policy_text(org)
@@ -93,7 +95,10 @@ def assess_tool_request(request_id: str, org_id: str) -> None:
             # archived in the gap between request creation and this task
             # running. Fail closed, same as any other assessment failure.
             raise ValueError("No active AI Policy text available for assessment")
-        prompt = render_assessment_prompt(org, request_type, name, link, use_case, policy_text)
+        prompt = render_assessment_prompt(
+            org, request_type, name, link, use_case, policy_text,
+            data_tiers=data_tiers, requires_enterprise_account=requires_enterprise_account,
+        )
         result = ai_gateway_service.complete("tool_assessment", org, prompt)
         classification, explanation = _parse_assessment(result.content)
 

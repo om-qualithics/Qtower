@@ -9,6 +9,8 @@ aboutproject.md
 policy_builder.md
 FullSmokeTest.md
 Qtower_CodeScan_Phase1_Handoff.md
+*_Handoff.md
+Vendor Checklist.xlsx
 
 # Environment / secrets
 .env
@@ -37,6 +39,7 @@ build/
 infra/data/
 infra/dev-certs/
 infra/logs/
+infra/.celery-worker.pid
 
 # OS / editor
 .DS_Store

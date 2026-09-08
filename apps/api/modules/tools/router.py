@@ -1,5 +1,7 @@
-from fastapi import APIRouter, Cookie, Depends, HTTPException, Query
+from fastapi import APIRouter, Cookie, Depends, File, HTTPException, Query, UploadFile
+from fastapi.responses import Response
 
+from apps.api.core.media import LogoValidationError, validate_logo_upload
 from apps.api.core.rate_limit import RateLimitExceededError, check_rate_limit
 from apps.api.modules.authz import service as authz_service
 from apps.api.modules.identity import service as identity_service
@@ -39,6 +41,7 @@ def _to_approved_tool_out(tool) -> ApprovedToolOut:
         access_url=tool.access_url,
         allowed_tiers=tool.allowed_tiers,
         details=tool.details,
+        logo_url=tool.logo_url,
         created_at=tool.created_at,
     )
 
@@ -51,6 +54,8 @@ def _to_tool_request_out(org, request) -> ToolRequestOut:
         name=request.name,
         link=request.link,
         intended_use_case=request.intended_use_case,
+        data_tiers=request.data_tiers,
+        requires_enterprise_account=request.requires_enterprise_account,
         status=request.status,
         ai_assessment_status=request.ai_assessment_status,
         ai_assessment_result=request.ai_assessment_result,
@@ -89,12 +94,47 @@ def update_approved_tool(tool_id: str, body: ApprovedToolUpdate, misty_session: 
             description=body.description,
             access_url=body.access_url,
             allowed_tiers=body.allowed_tiers,
+            logo_url=body.logo_url,
         )
     except ToolApprovalError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     if tool is None:
         raise HTTPException(status_code=404, detail="Tool not found")
     return _to_approved_tool_out(tool)
+
+
+@router.post("/approved/{tool_id}/logo", response_model=ApprovedToolOut)
+async def upload_tool_logo(tool_id: str, file: UploadFile = File(...), misty_session: str | None = Cookie(default=None)):
+    user = _require_user(misty_session)
+    if not authz_service.can(user, "tools.manage"):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    org = identity_service.get_org()
+    data = await file.read()
+    try:
+        content_type = validate_logo_upload(file.content_type, data)
+    except LogoValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    tool = tools_service.upload_tool_logo(org, tool_id, content_type, data)
+    if tool is None:
+        raise HTTPException(status_code=404, detail="Tool not found")
+    return _to_approved_tool_out(tool)
+
+
+@router.get("/approved/{tool_id}/logo-file")
+def get_tool_logo(tool_id: str):
+    """Deliberately unauthenticated (unlike every other route on this
+    router) - a browser <img> tag loading this cross-origin (API on a
+    different port than the frontend) won't send the httponly session
+    cookie without crossOrigin="use-credentials" wired up on the <img>
+    element, and a logo is branding-adjacent, non-sensitive imagery, not
+    data worth gating behind a session the way the catalog data itself
+    is (same posture as the already-public GET /branding/config)."""
+    org = identity_service.get_org()
+    result = tools_service.get_tool_logo_bytes(org, tool_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Logo not found")
+    data, content_type = result
+    return Response(content=data, media_type=content_type)
 
 
 @router.delete("/approved/{tool_id}", status_code=204)
@@ -122,7 +162,16 @@ def create_tool_request(body: ToolRequestCreate, misty_session: str | None = Coo
         raise HTTPException(status_code=429, detail=str(exc)) from exc
     org = identity_service.get_org()
     try:
-        request = tools_service.create_request(org, user, body.request_type, body.name, body.link, body.intended_use_case)
+        request = tools_service.create_request(
+            org,
+            user,
+            body.request_type,
+            body.name,
+            body.link,
+            body.intended_use_case,
+            data_tiers=body.data_tiers,
+            requires_enterprise_account=body.requires_enterprise_account,
+        )
     except ToolRequestDuplicateError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except ToolRequestValidationError as exc:

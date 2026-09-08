@@ -11,6 +11,7 @@ class ApprovedToolOut(BaseModel):
     access_url: str
     allowed_tiers: list[str]
     details: str | None
+    logo_url: str | None
     created_at: datetime
 
 
@@ -20,6 +21,8 @@ class ToolRequestOut(BaseModel):
     name: str
     link: str
     intended_use_case: str
+    data_tiers: list[str]
+    requires_enterprise_account: bool
     status: str
     ai_assessment_status: str
     ai_assessment_result: str | None
@@ -39,6 +42,8 @@ class ToolRequestCreate(BaseModel):
     name: str
     link: str
     intended_use_case: str
+    data_tiers: list[str] = []
+    requires_enterprise_account: bool
 
 
 class ToolRequestApprove(BaseModel):
@@ -55,3 +60,4 @@ class ApprovedToolUpdate(BaseModel):
     description: str
     access_url: str
     allowed_tiers: list[str]
+    logo_url: str | None = None

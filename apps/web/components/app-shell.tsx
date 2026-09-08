@@ -30,7 +30,11 @@ import { getStoredDark, setStoredDark } from "@/lib/theme";
 const NAV_ITEMS = [
   { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard, enabled: true },
   { label: "AI Policy", href: "/policy", icon: ScrollText, enabled: true },
-  { label: "AI Tools", href: "/tools", icon: Grid3x3, enabled: true },
+  // activePrefix: broader than href itself, since "/ai-center/tools" is
+  // the actual link target (there's no page at bare "/ai-center") but the
+  // nav item should still highlight while on any of its sibling tabs
+  // ("/ai-center/project", "/ai-center/vendor-register").
+  { label: "AI Center", href: "/ai-center/tools", activePrefix: "/ai-center", icon: Grid3x3, enabled: true },
   { label: "Raise Alert", href: "/escalations", icon: AlertTriangle, enabled: true },
   { label: "Training", href: "/training", icon: GraduationCap, enabled: true },
   { label: "Code Scan", href: "/codescan", icon: Bug, enabled: true },
@@ -119,7 +123,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <nav className="flex flex-1 flex-col gap-1">
           {NAV_ITEMS.filter((item) => item.label !== "Settings" || canSeeSettings(user)).map((item) => {
             const Icon = item.icon;
-            const active = item.href !== null && pathname === item.href;
+            // Not a plain exact match - a nav item whose href (or
+            // activePrefix, for AI Center's sibling tabs) has sub-routes
+            // should still highlight while on one of them. Harmless for
+            // every other item here, none of which have sub-routes.
+            const activePrefix = item.activePrefix ?? item.href;
+            const active =
+              item.href !== null && (pathname === item.href || pathname.startsWith(activePrefix + "/"));
             if (!item.enabled || item.href === null) {
               return (
                 <div

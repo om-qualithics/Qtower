@@ -58,7 +58,9 @@ def test_get_summary_role_gating() -> None:
         assure = _make_user(org, "assure@example.com", "assure")
         govern = _make_user(org, "govern@example.com", "govern")
 
-        tools_service.create_request(org, operator, "tool", "Some Tool", "https://example.com", "use case")
+        tools_service.create_request(
+            org, operator, "tool", "Some Tool", "https://example.com", " ".join(["word"] * 150)
+        )
         escalations_service.create_escalation(org, "other", "Something felt off")
 
         with org_scoped_session(str(org.id)) as db:

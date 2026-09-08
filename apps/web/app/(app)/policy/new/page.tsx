@@ -159,7 +159,7 @@ function PolicyWizard() {
     // w-fit (not w-full) is deliberate: this content block - header +
     // the card/panel row below - should size to its own content and then
     // center as one unit via mx-auto, matching every other page in this
-    // app (/policy, /tools, /dashboard all use `mx-auto max-w-*`). w-full
+    // app (/policy, /ai-center/tools, /dashboard all use `mx-auto max-w-*`). w-full
     // was the bug the user caught - it stretched this container to fill
     // the whole main area regardless of content width, so flex-1 on the
     // left column then grew to fill that leftover space while the card

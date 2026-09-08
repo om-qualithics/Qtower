@@ -146,7 +146,7 @@ export default function DashboardPage() {
           <Button
             variant="outline"
             render={
-              <a href="/tools">
+              <a href="/ai-center/tools">
                 <Wrench /> Go to AI Tools
               </a>
             }
@@ -230,7 +230,7 @@ export default function DashboardPage() {
                   category="tool"
                   title={`"${request.name}" awaiting approval`}
                   date={request.created_at}
-                  href="/tools"
+                  href="/ai-center/tools"
                 />
               ))}
               {summary.pending_alerts.map((alert) => (
@@ -270,7 +270,7 @@ export default function DashboardPage() {
                   category="tool"
                   title={`Your request for "${request.name}" is pending approval`}
                   date={request.created_at}
-                  href="/tools"
+                  href="/ai-center/tools"
                 />
               ))}
             </div>

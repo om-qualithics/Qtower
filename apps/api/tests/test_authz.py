@@ -124,3 +124,55 @@ def test_codescan_run_and_view_allowed_for_any_authenticated_user() -> None:
         assert can(_user("govern", "user"), action)
         assert can(_user("assure", "user"), action)
         assert can(_user("operator", "user"), action)
+
+
+def test_vendor_view_allowed_for_any_authenticated_user() -> None:
+    assert can(_user("operator", "user"), "vendor.view")
+    assert can(_user("govern", "super_admin"), "vendor.view")
+
+
+def test_vendor_request_allowed_for_every_business_role() -> None:
+    assert can(_user("govern", "user"), "vendor.request")
+    assert can(_user("assure", "user"), "vendor.request")
+    assert can(_user("operator", "user"), "vendor.request")
+    assert can(_user("operator", "admin"), "vendor.request")
+
+
+def test_vendor_approve_requires_govern_or_assure() -> None:
+    assert not can(_user("operator", "user"), "vendor.approve")
+    assert can(_user("govern", "user"), "vendor.approve")
+    assert can(_user("assure", "user"), "vendor.approve")
+    assert can(_user("operator", "admin"), "vendor.approve")
+
+
+def test_vendor_manage_requires_govern_or_assure() -> None:
+    assert not can(_user("operator", "user"), "vendor.manage")
+    assert can(_user("govern", "user"), "vendor.manage")
+    assert can(_user("assure", "user"), "vendor.manage")
+    assert can(_user("operator", "super_admin"), "vendor.manage")
+
+
+def test_project_view_allowed_for_any_authenticated_user() -> None:
+    assert can(_user("operator", "user"), "project.view")
+    assert can(_user("govern", "super_admin"), "project.view")
+
+
+def test_project_request_allowed_for_every_business_role() -> None:
+    assert can(_user("govern", "user"), "project.request")
+    assert can(_user("assure", "user"), "project.request")
+    assert can(_user("operator", "user"), "project.request")
+    assert can(_user("operator", "admin"), "project.request")
+
+
+def test_project_approve_requires_govern_or_assure() -> None:
+    assert not can(_user("operator", "user"), "project.approve")
+    assert can(_user("govern", "user"), "project.approve")
+    assert can(_user("assure", "user"), "project.approve")
+    assert can(_user("operator", "admin"), "project.approve")
+
+
+def test_project_manage_requires_govern_or_assure() -> None:
+    assert not can(_user("operator", "user"), "project.manage")
+    assert can(_user("govern", "user"), "project.manage")
+    assert can(_user("assure", "user"), "project.manage")
+    assert can(_user("operator", "super_admin"), "project.manage")

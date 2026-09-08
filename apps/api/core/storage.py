@@ -45,6 +45,15 @@ def download_bytes(key: str) -> bytes:
     return response["Body"].read()
 
 
+def download_bytes_with_content_type(key: str) -> tuple[bytes, str]:
+    """Same as download_bytes() plus the stored Content-Type - used for
+    logo/media routes that stream bytes straight back to a <img> tag
+    rather than handing out a presigned download link, so no separate
+    place needs to remember what type was uploaded."""
+    response = _client.get_object(Bucket=settings.minio_bucket, Key=key)
+    return response["Body"].read(), response.get("ContentType") or "application/octet-stream"
+
+
 def presigned_url(key: str, expires_seconds: int = 300) -> str:
     """Lets the frontend download directly from MinIO/S3 rather than
     proxying large files through the API. Signed against

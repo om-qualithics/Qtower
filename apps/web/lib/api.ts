@@ -364,8 +364,17 @@ export type ApprovedTool = {
   access_url: string;
   allowed_tiers: string[];
   details: string | null;
+  logo_url: string | null;
   created_at: string;
 };
+
+// logo_url is either a full external URL (an admin pasted one directly)
+// or a relative API path (an uploaded logo's streaming route) - resolve
+// to something an <img src> can always use directly.
+export function resolveLogoUrl(logoUrl: string | null): string | null {
+  if (!logoUrl) return null;
+  return logoUrl.startsWith("http") ? logoUrl : `${API_BASE_URL}${logoUrl}`;
+}
 
 export type ToolRequest = {
   id: string;
@@ -373,6 +382,8 @@ export type ToolRequest = {
   name: string;
   link: string;
   intended_use_case: string;
+  data_tiers: string[];
+  requires_enterprise_account: boolean;
   status: ToolRequestStatus;
   ai_assessment_status: ToolAssessmentStatus;
   ai_assessment_result: ToolAssessmentResult | null;
@@ -399,13 +410,22 @@ export async function createToolRequest(
   requestType: ToolRequestType,
   name: string,
   link: string,
-  intendedUseCase: string
+  intendedUseCase: string,
+  dataTiers: string[] = [],
+  requiresEnterpriseAccount: boolean = false
 ): Promise<ToolRequest> {
   const res = await fetch(`${API_BASE_URL}/tools/requests`, {
     method: "POST",
     credentials: "include",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ request_type: requestType, name, link, intended_use_case: intendedUseCase }),
+    body: JSON.stringify({
+      request_type: requestType,
+      name,
+      link,
+      intended_use_case: intendedUseCase,
+      data_tiers: dataTiers,
+      requires_enterprise_account: requiresEnterpriseAccount,
+    }),
   });
   if (res.status === 400) {
     const body = await res.json();
@@ -446,15 +466,32 @@ export async function updateApprovedTool(
   name: string,
   description: string,
   accessUrl: string,
-  allowedTiers: string[]
+  allowedTiers: string[],
+  logoUrl: string | null = null
 ): Promise<ApprovedTool> {
   const res = await fetch(`${API_BASE_URL}/tools/approved/${id}`, {
     method: "PATCH",
     credentials: "include",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name, description, access_url: accessUrl, allowed_tiers: allowedTiers }),
+    body: JSON.stringify({ name, description, access_url: accessUrl, allowed_tiers: allowedTiers, logo_url: logoUrl }),
   });
   await throwIfNotOk(res, "Failed to update tool");
+  return res.json();
+}
+
+export async function uploadToolLogo(id: string, file: File): Promise<ApprovedTool> {
+  const formData = new FormData();
+  formData.append("file", file);
+  const res = await fetch(`${API_BASE_URL}/tools/approved/${id}/logo`, {
+    method: "POST",
+    credentials: "include",
+    body: formData,
+  });
+  if (res.status === 400) {
+    const body = await res.json();
+    throw new Error(body.detail ?? "Failed to upload logo");
+  }
+  await throwIfNotOk(res, "Failed to upload logo");
   return res.json();
 }
 
@@ -478,6 +515,340 @@ export async function rejectToolRequest(id: string, reason?: string): Promise<To
     throw new Error(body.detail ?? "Failed to reject request");
   }
   await throwIfNotOk(res, "Failed to reject request");
+  return res.json();
+}
+
+// --- Vendor Register ---
+
+export type VendorType = "commercial" | "open_source";
+export type VendorStatus = "approved" | "needs_review" | "restricted" | "pending";
+export type VendorRequestStatus = "pending" | "approved" | "rejected";
+export type ChecklistTier = "must_have" | "good_to_have" | "optional";
+export type ChecklistAppliesTo = "commercial" | "open_source" | "both";
+export type ChecklistAnswerValue = "yes" | "no" | "partial" | "not_applicable";
+
+export type VendorChecklistItem = {
+  id: string;
+  key: string;
+  question: string;
+  tier: ChecklistTier;
+  applies_to: ChecklistAppliesTo;
+  sort_order: number;
+};
+
+export type VendorChecklistResponse = {
+  checklist_item_id: string;
+  answer: ChecklistAnswerValue;
+  evidence_note: string | null;
+  last_verified_date: string | null;
+};
+
+export type Vendor = {
+  id: string;
+  name: string;
+  type: VendorType;
+  category: string | null;
+  logo_url: string | null;
+  website_url: string | null;
+  status: VendorStatus;
+  overall_score: number | null;
+  created_at: string;
+};
+
+export type VendorDetail = Vendor & {
+  checklist_responses: VendorChecklistResponse[];
+};
+
+export type VendorRequestChecklistAnswer = {
+  checklist_item_id: string;
+  answer: ChecklistAnswerValue;
+  evidence_note?: string | null;
+};
+
+export type VendorRequest = {
+  id: string;
+  name: string;
+  type: VendorType;
+  website_url: string | null;
+  business_justification: string;
+  projected_status: VendorStatus | null;
+  overall_score: number | null;
+  status: VendorRequestStatus;
+  requested_by: string;
+  requested_by_email: string | null;
+  decided_by: string | null;
+  decided_at: string | null;
+  resulting_vendor_id: string | null;
+  created_at: string;
+  checklist_responses: VendorRequestChecklistAnswer[];
+};
+
+export class VendorRequestDuplicateError extends Error {}
+
+export async function fetchVendors(type?: VendorType): Promise<Vendor[]> {
+  const params = type ? `?type=${type}` : "";
+  const res = await fetch(`${API_BASE_URL}/vendors${params}`, { credentials: "include" });
+  await throwIfNotOk(res, "Failed to fetch vendors");
+  return res.json();
+}
+
+export async function fetchVendor(id: string): Promise<VendorDetail> {
+  const res = await fetch(`${API_BASE_URL}/vendors/${id}`, { credentials: "include" });
+  await throwIfNotOk(res, "Failed to fetch vendor");
+  return res.json();
+}
+
+export async function fetchVendorChecklistItems(appliesTo?: VendorType): Promise<VendorChecklistItem[]> {
+  const params = appliesTo ? `?applies_to=${appliesTo}` : "";
+  const res = await fetch(`${API_BASE_URL}/vendors/checklist-items${params}`, { credentials: "include" });
+  await throwIfNotOk(res, "Failed to fetch checklist items");
+  return res.json();
+}
+
+export async function createVendorRequest(
+  name: string,
+  type: VendorType,
+  websiteUrl: string | null,
+  businessJustification: string,
+  responses: VendorRequestChecklistAnswer[] = []
+): Promise<VendorRequest> {
+  const res = await fetch(`${API_BASE_URL}/vendors/request`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      name,
+      type,
+      website_url: websiteUrl,
+      business_justification: businessJustification,
+      responses,
+    }),
+  });
+  if (res.status === 400) {
+    const body = await res.json();
+    throw new VendorRequestDuplicateError(body.detail ?? "This request could not be created");
+  }
+  await throwIfNotOk(res, "Failed to submit vendor request");
+  return res.json();
+}
+
+export async function fetchVendorRequests(options: { mine?: boolean } = {}): Promise<VendorRequest[]> {
+  const params = options.mine ? "?mine=true" : "";
+  const res = await fetch(`${API_BASE_URL}/vendors/requests${params}`, { credentials: "include" });
+  await throwIfNotOk(res, "Failed to fetch vendor requests");
+  return res.json();
+}
+
+export async function approveVendorRequest(id: string): Promise<VendorRequest> {
+  const res = await fetch(`${API_BASE_URL}/vendors/requests/${id}/approve`, {
+    method: "POST",
+    credentials: "include",
+  });
+  if (res.status === 400) {
+    const body = await res.json();
+    throw new Error(body.detail ?? "Failed to approve request");
+  }
+  await throwIfNotOk(res, "Failed to approve request");
+  return res.json();
+}
+
+export async function rejectVendorRequest(id: string): Promise<VendorRequest> {
+  const res = await fetch(`${API_BASE_URL}/vendors/requests/${id}/reject`, {
+    method: "POST",
+    credentials: "include",
+  });
+  if (res.status === 400) {
+    const body = await res.json();
+    throw new Error(body.detail ?? "Failed to reject request");
+  }
+  await throwIfNotOk(res, "Failed to reject request");
+  return res.json();
+}
+
+export async function updateVendorChecklistResponses(
+  vendorId: string,
+  responses: { checklist_item_id: string; answer: ChecklistAnswerValue; evidence_note?: string | null }[]
+): Promise<Vendor> {
+  const res = await fetch(`${API_BASE_URL}/vendors/${vendorId}/checklist-responses`, {
+    method: "PUT",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ responses }),
+  });
+  if (res.status === 400) {
+    const body = await res.json();
+    throw new Error(body.detail ?? "Failed to save checklist responses");
+  }
+  await throwIfNotOk(res, "Failed to save checklist responses");
+  return res.json();
+}
+
+export async function deleteVendor(id: string): Promise<void> {
+  const res = await fetch(`${API_BASE_URL}/vendors/${id}`, { method: "DELETE", credentials: "include" });
+  await throwIfNotOk(res, "Failed to delete vendor");
+}
+
+export async function updateVendorLogoUrl(id: string, logoUrl: string | null): Promise<Vendor> {
+  const res = await fetch(`${API_BASE_URL}/vendors/${id}/logo`, {
+    method: "PATCH",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ logo_url: logoUrl }),
+  });
+  await throwIfNotOk(res, "Failed to update vendor logo");
+  return res.json();
+}
+
+export async function uploadVendorLogo(id: string, file: File): Promise<Vendor> {
+  const formData = new FormData();
+  formData.append("file", file);
+  const res = await fetch(`${API_BASE_URL}/vendors/${id}/logo`, {
+    method: "POST",
+    credentials: "include",
+    body: formData,
+  });
+  if (res.status === 400) {
+    const body = await res.json();
+    throw new Error(body.detail ?? "Failed to upload logo");
+  }
+  await throwIfNotOk(res, "Failed to upload logo");
+  return res.json();
+}
+
+// --- AI Project ---
+
+export type ProjectLifecycleStage = "idea" | "pilot" | "production" | "retired";
+export type ProjectRequestStatus = "pending" | "approved" | "rejected";
+export type ProjectAssessmentStatus = "pending" | "complete" | "failed" | "skipped";
+export type ProjectAssessmentResult = "approvable" | "needs_review" | "cannot_approve";
+
+// tool_id/vendor_id/other_name: exactly one set per link, matching the
+// backend's LinkIn/LinkOut shape (shared between tool and vendor links).
+export type ProjectLinkIn = {
+  tool_id?: string | null;
+  vendor_id?: string | null;
+  other_name?: string | null;
+};
+
+export type ProjectLinkOut = {
+  id: string;
+  tool_id?: string | null;
+  vendor_id?: string | null;
+  other_name: string | null;
+  name: string | null;
+  status: string | null;
+  in_inventory: boolean;
+};
+
+export type Project = {
+  id: string;
+  name: string;
+  description: string;
+  lifecycle_stage: ProjectLifecycleStage;
+  owner_user_id: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ProjectDetail = Project & {
+  linked_tools: ProjectLinkOut[];
+  linked_vendors: ProjectLinkOut[];
+};
+
+export type ProjectRequest = {
+  id: string;
+  name: string;
+  description: string;
+  business_justification: string;
+  data_flow_description: string;
+  data_tiers: string[];
+  human_in_loop: boolean;
+  status: ProjectRequestStatus;
+  project_assessment_status: ProjectAssessmentStatus;
+  project_assessment_result: ProjectAssessmentResult | null;
+  project_assessment_explanation: string | null;
+  requested_by: string;
+  requested_by_email: string | null;
+  decided_by: string | null;
+  decided_at: string | null;
+  resulting_project_id: string | null;
+  created_at: string;
+  updated_at: string;
+  linked_tools: ProjectLinkOut[];
+  linked_vendors: ProjectLinkOut[];
+};
+
+export async function createProjectRequest(
+  name: string,
+  description: string,
+  businessJustification: string,
+  dataFlowDescription: string,
+  humanInLoop: boolean,
+  toolLinks: ProjectLinkIn[] = [],
+  vendorLinks: ProjectLinkIn[] = [],
+  dataTiers: string[] = []
+): Promise<ProjectRequest> {
+  const res = await fetch(`${API_BASE_URL}/projects/request`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      name,
+      description,
+      business_justification: businessJustification,
+      data_flow_description: dataFlowDescription,
+      data_tiers: dataTiers,
+      human_in_loop: humanInLoop,
+      tool_links: toolLinks,
+      vendor_links: vendorLinks,
+    }),
+  });
+  await throwIfNotOk(res, "Failed to submit project request");
+  return res.json();
+}
+
+export async function fetchProjectRequests(options: { mine?: boolean } = {}): Promise<ProjectRequest[]> {
+  const params = options.mine ? "?mine=true" : "";
+  const res = await fetch(`${API_BASE_URL}/projects/requests${params}`, { credentials: "include" });
+  await throwIfNotOk(res, "Failed to fetch project requests");
+  return res.json();
+}
+
+export async function approveProjectRequest(id: string): Promise<ProjectRequest> {
+  const res = await fetch(`${API_BASE_URL}/projects/requests/${id}/approve`, {
+    method: "POST",
+    credentials: "include",
+  });
+  if (res.status === 400) {
+    const body = await res.json();
+    throw new Error(body.detail ?? "Failed to approve request");
+  }
+  await throwIfNotOk(res, "Failed to approve request");
+  return res.json();
+}
+
+export async function rejectProjectRequest(id: string): Promise<ProjectRequest> {
+  const res = await fetch(`${API_BASE_URL}/projects/requests/${id}/reject`, {
+    method: "POST",
+    credentials: "include",
+  });
+  if (res.status === 400) {
+    const body = await res.json();
+    throw new Error(body.detail ?? "Failed to reject request");
+  }
+  await throwIfNotOk(res, "Failed to reject request");
+  return res.json();
+}
+
+export async function fetchProjects(): Promise<Project[]> {
+  const res = await fetch(`${API_BASE_URL}/projects`, { credentials: "include" });
+  await throwIfNotOk(res, "Failed to fetch projects");
+  return res.json();
+}
+
+export async function fetchProject(id: string): Promise<ProjectDetail> {
+  const res = await fetch(`${API_BASE_URL}/projects/${id}`, { credentials: "include" });
+  await throwIfNotOk(res, "Failed to fetch project");
   return res.json();
 }
 
